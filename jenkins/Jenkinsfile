@@ -1,0 +1,36 @@
+pipeline {
+  agent any
+
+  environment {
+    AWS_REGION = "us-east-1"
+    BUCKET_NAME = "ai-deployment-bucket"
+    PAYLOAD_KEY = "payloads/input.json"
+  }
+
+  stages {
+    stage('Fetch Payload') {
+      steps {
+        sh 'aws s3 cp s3://$BUCKET_NAME/$PAYLOAD_KEY ./payloads/sample.json'
+      }
+    }
+
+    stage('Terraform Init') {
+      steps {
+        sh 'terraform init'
+      }
+    }
+
+    stage('Terraform Plan') {
+      steps {
+        sh 'terraform plan -out=tfplan'
+      }
+    }
+
+    stage('Terraform Apply') {
+      steps {
+        sh 'terraform apply -auto-approve tfplan'
+      }
+    }
+  }
+}
+

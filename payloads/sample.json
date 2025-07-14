@@ -1,0 +1,11 @@
+{
+  "instances": {
+    "web-server": {
+      "name": "web-server",
+      "ami": "ami-0c55b159cbfafe1f0",
+      "instance_type": "t2.micro",
+      "user_data": "#!/bin/bash\necho Hello from Web Server > /var/www/html/index.html"
+    }
+  }
+}
+
