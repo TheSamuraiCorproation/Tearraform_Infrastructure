@@ -10,7 +10,7 @@ pipeline {
   stages {
     stage('Fetch Payload') {
       steps {
-        withAWS(credentials: 'aws-creds', region: "${env.AWS_REGION}") {
+        withAWS(credentials: 'mnasri', region: "${env.AWS_REGION}") {
           sh 'aws s3 cp s3://$BUCKET_NAME/$PAYLOAD_KEY ./payloads/sample.json'
         }
       }
