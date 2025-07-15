@@ -2,23 +2,18 @@ provider "aws" {
   region = var.aws_region
 }
 
-variable "payload_s3_key" {
-  description = "The S3 key of the payload JSON file"
-  type        = string
-}
-
 data "aws_s3_object" "payload" {
-  bucket = "thesamuraibucket"
-  key    = var.payload_s3_key
+  bucket = var.s3_payload_bucket
+  key    = var.s3_payload_key
 }
 
 locals {
-  payload_content = jsondecode(data.aws_s3_object.payload.body)
+  payload = jsondecode(data.aws_s3_object.payload.body)
 }
 
 module "ec2_instances" {
   source = "./modules/ec2"
-  for_each = local.payload_content.instances
+  for_each = local.payload.instances
 
   name          = each.value.name
   ami           = each.value.ami
