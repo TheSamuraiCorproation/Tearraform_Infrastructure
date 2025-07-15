@@ -1,38 +1,26 @@
 pipeline {
   agent any
-
-  environment {
-    AWS_REGION = "eu-central-1"
-    BUCKET_NAME = "thesamuraibucket"
-    PAYLOAD_KEY = "payloads/input.json"
+  parameters {
+    string(name: 'BUCKET', defaultValue: '', description: 'S3 the samurai bucket')
+    string(name: 'KEY',    defaultValue: '', description: 'S3 object key')
   }
-
   stages {
-    stage('Fetch Payload') {
-      steps {
-        withAWS(credentials: 'mnasri', region: "${env.AWS_REGION}") {
-          sh 'aws s3 cp s3://$BUCKET_NAME/$PAYLOAD_KEY ./payloads/sample.json'
-        }
-      }
+    stage('Checkout') {
+      steps { checkout scm }
     }
-
     stage('Terraform Init') {
-      steps {
-        sh 'terraform init'
-      }
+      steps { sh 'terraform init -input=false' }
     }
-
-    stage('Terraform Plan') {
-      steps {
-        sh 'terraform plan -out=tfplan'
-      }
-    }
-
     stage('Terraform Apply') {
       steps {
-        sh 'terraform apply -auto-approve tfplan'
+        sh "terraform apply -var 's3_payload_bucket=${BUCKET}' -var 's3_payload_key=${KEY}' -auto-approve"
+      }
+    }
+    stage('Archive Outputs') {
+      steps {
+        sh 'terraform output -json > outputs.json'
+        archiveArtifacts artifacts: 'outputs.json'
       }
     }
   }
 }
-
