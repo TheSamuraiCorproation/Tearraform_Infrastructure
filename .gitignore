@@ -1,0 +1,11 @@
+Terraform state files
+
+**/.tfstate **/.tfstate.backup
+
+Terraform variable files
+
+**/*.tfvars
+
+Other sensitive files (if applicable)
+
+**/.pem **/.key
