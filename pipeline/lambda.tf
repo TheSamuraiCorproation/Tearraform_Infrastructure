@@ -63,7 +63,7 @@ resource "aws_lambda_function" "forwarder" {
 
   environment {
     variables = {
-      JENKINS_URL       = "http://192.168.186.155:8080"
+      JENKINS_URL       = "http://197.1.206.75:8080"
       JOB_NAME          = "terraform-deploy"
       JENKINS_TOKEN     = var.jenkins_token
       JENKINS_USER      = var.jenkins_user
