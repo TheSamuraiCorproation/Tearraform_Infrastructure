@@ -1,8 +1,8 @@
 pipeline {
   agent any
   parameters {
-    string(name: 'BUCKET', defaultValue: '', description: 'S3 the samurai bucket')
-    string(name: 'KEY',    defaultValue: '', description: 'S3 object key')
+    string(name: 'BUCKET', defaultValue: '', description: 'S3 bucket name')
+    string(name: 'KEY', defaultValue: '', description: 'S3 object key')
   }
   stages {
     stage('Checkout') {

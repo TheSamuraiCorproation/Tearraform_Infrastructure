@@ -11,7 +11,6 @@ variable "instance_type" {
 }
 
 variable "user_data" {
-  type = string
+  type    = string
   default = ""
 }
-

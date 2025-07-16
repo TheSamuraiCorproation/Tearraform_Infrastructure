@@ -9,3 +9,12 @@ Terraform variable files
 Other sensitive files (if applicable)
 
 **/.pem **/.key
+terraform.tfvars
+terraform.tfvars
+pipeline/terraform.tfvars
+.terraform/
+*.tfstate
+*.tfstate.backup
+lambda.zip
+.terraform/providers/
+terraform-provider-*

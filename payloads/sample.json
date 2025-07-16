@@ -2,13 +2,13 @@
   "instances": {
     "ubuntu-vm-1": {
       "name": "ubuntu-vm-1",
-      "ami": "ami-0dc33c9c954b3f073",  
+      "ami": "ami-0b2ac948e1b1d07c4",
       "instance_type": "t2.micro",
       "user_data": "#!/bin/bash\napt update -y && apt install nginx -y"
     },
     "ubuntu-vm-2": {
       "name": "ubuntu-vm-2",
-      "ami": "ami-0dc33c9c954b3f073",
+      "ami": "ami-0b2ac948e1b1d07c4",
       "instance_type": "t2.small",
       "user_data": "#!/bin/bash\napt update -y && apt install htop -y"
     }
