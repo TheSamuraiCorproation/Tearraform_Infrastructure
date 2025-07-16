@@ -1,34 +1,25 @@
-Terraform state files
-
-**/.tfstate **/.tfstate.backup
-
-Terraform variable files
+# Terraform state and provider files
 .terraform/
-terraform.tfstate
-terraform.tfstate.backup
-terraform.tfvars
-lambda.zip
+*.tfstate
+*.tfstate.backup
+.terraform/providers/
+terraform-provider-*
+.terraform.lock.hcl
+
+# Terraform variable files
 *.tfvars
-*.tfstate*
+pipeline/*.tfvars
+terraform.tfvars
+
+# Lambda deployment artifact
+lambda.zip
+
+# Python cache files
 __pycache__/
 *.pyc
-**/*.tfvars
 
-Other sensitive files (if applicable)
-
-**/.pem **/.key
-terraform.tfvars
-terraform.tfvars
-pipeline/terraform.tfvars
-.terraform/
-*.tfstate
-*.tfstate.backup
-lambda.zip
-.terraform/providers/
-terraform-provider-*
-.terraform/
-*.tfstate
-*.tfstate.backup
-lambda.zip
-.terraform/providers/
-terraform-provider-*
+# Sensitive files (e.g., SSH keys)
+*.pem
+*.key
+**/.pem
+**/.key
