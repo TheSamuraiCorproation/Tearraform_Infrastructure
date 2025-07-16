@@ -1,11 +1,16 @@
 {
   "instances": {
-    "web-server": {
-      "name": "web-server",
-      "ami": "ami-0c55b159cbfafe1f0",
+    "ubuntu-vm-1": {
+      "name": "ubuntu-vm-1",
+      "ami": "ami-0dc33c9c954b3f073",  
       "instance_type": "t2.micro",
-      "user_data": "#!/bin/bash\necho Hello from Web Server > /var/www/html/index.html"
+      "user_data": "#!/bin/bash\napt update -y && apt install nginx -y"
+    },
+    "ubuntu-vm-2": {
+      "name": "ubuntu-vm-2",
+      "ami": "ami-0dc33c9c954b3f073",
+      "instance_type": "t2.small",
+      "user_data": "#!/bin/bash\napt update -y && apt install htop -y"
     }
   }
 }
-
