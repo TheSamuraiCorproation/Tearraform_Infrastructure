@@ -59,7 +59,7 @@ resource "aws_lambda_function" "forwarder" {
   role             = aws_iam_role.lambda_role.arn
   source_code_hash = filebase64sha256("lambda.zip")
   description      = "Triggers Jenkins pipeline on S3 JSON upload"
-  timeout          = 30
+  timeout          = 60
 
   environment {
     variables = {
