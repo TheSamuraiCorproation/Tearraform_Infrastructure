@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Terraform state and provider files
 .terraform/
 *.tfstate
@@ -23,3 +24,10 @@ __pycache__/
 *.key
 **/.pem
 **/.key
+=======
+# Additional exclusions from 8ddf2f9
+.terraform.lock.hcl
+pipeline/.terraform.lock.hcl
+terraform-provider-*
+lambda.zip
+>>>>>>> 8ddf2f9
