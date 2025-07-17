@@ -1,16 +1,9 @@
-variable "name" {
-  type = string
-}
-
-variable "ami" {
-  type = string
-}
-
-variable "instance_type" {
-  type = string
-}
-
-variable "user_data" {
-  type    = string
-  default = ""
+variable "instances" {
+  description = "Map of EC2 instance configurations"
+  type        = map(object({
+    ami           = string
+    instance_type = string
+    user_data     = string
+    name          = string
+  }))
 }

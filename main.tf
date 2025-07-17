@@ -12,11 +12,10 @@ locals {
 }
 
 module "ec2_instances" {
-  source = "./modules/ec2"
-  for_each = local.payload.instances
+  source   = "./modules/ec2"
+  instances = local.payload.instances
+}
 
-  name          = each.value.name
-  ami           = each.value.ami
-  instance_type = each.value.instance_type
-  user_data     = each.value.user_data
+output "ec2_public_ips" {
+  value = module.ec2_instances.public_ips
 }

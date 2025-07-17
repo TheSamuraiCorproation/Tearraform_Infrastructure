@@ -1,15 +1,17 @@
-resource "aws_instance" "this" {e
-  ami           = var.ami
-  instance_type = var.instance_type
-  user_data     = var.user_data
+resource "aws_instance" "this" {
+  for_each = var.instances
+
+  ami           = each.value.ami
+  instance_type = each.value.instance_type
+  user_data     = each.value.user_data
 
   tags = {
-    Name = var.name
+    Name = each.value.name
   }
 
   associate_public_ip_address = true
 }
 
-output "public_ip" {
-  value = aws_instance.this.public_ip
+output "public_ips" {
+  value = { for k, v in aws_instance.this : k => v.public_ip }
 }
