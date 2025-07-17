@@ -1,8 +1,14 @@
 pipeline {
   agent any
   parameters {
-    string(name: 'BUCKET', defaultValue: '', description: 'S3 bucket name')
+    string(name: 'BUCKET', defaultValue: 'thesamuraibucket', description: 'S3 bucket name')
     string(name: 'KEY', defaultValue: '', description: 'S3 object key')
+  }
+  environment {
+    JENKINS_URL = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
+    AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
+    AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+    AWS_DEFAULT_REGION = 'eu-central-1'
   }
   stages {
     stage('Checkout') {
@@ -15,7 +21,7 @@ pipeline {
     }
     stage('Terraform Apply') {
       steps {
-        sh "terraform apply -var 's3_payload_bucket=${BUCKET}' -var 's3_payload_key=${KEY}' -auto-approve"
+        sh "terraform apply -var 's3_payload_bucket=${BUCKET}' -var 's3_payload_key=${KEY}' -var 'jenkins_url=${JENKINS_URL}' -auto-approve"
       }
     }
     stage('Archive Outputs') {
