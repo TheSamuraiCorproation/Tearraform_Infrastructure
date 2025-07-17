@@ -5,10 +5,8 @@ pipeline {
     string(name: 'KEY', defaultValue: '', description: 'S3 object key')
   }
   environment {
-    JENKINS_URL = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
-    AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
-    AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
     AWS_DEFAULT_REGION = 'eu-central-1'
+    JENKINS_URL = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
   }
   stages {
     stage('Checkout') {
@@ -16,14 +14,33 @@ pipeline {
         git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
       }
     }
+
     stage('Terraform Init') {
-      steps { sh 'terraform init -input=false' }
-    }
-    stage('Terraform Apply') {
       steps {
-        sh "terraform apply -var 's3_payload_bucket=${BUCKET}' -var 's3_payload_key=${KEY}' -var 'jenkins_url=${JENKINS_URL}' -auto-approve"
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          sh 'terraform init -input=false'
+        }
       }
     }
+
+    stage('Terraform Apply') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          sh "terraform apply -var 's3_payload_bucket=${BUCKET}' -var 's3_payload_key=${KEY}' -var 'jenkins_url=${JENKINS_URL}' -auto-approve"
+        }
+      }
+    }
+
     stage('Archive Outputs') {
       steps {
         sh 'terraform output -json > outputs.json'
@@ -32,3 +49,4 @@ pipeline {
     }
   }
 }
+
