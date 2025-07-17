@@ -6,7 +6,9 @@ pipeline {
   }
   stages {
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
+      }
     }
     stage('Terraform Init') {
       steps { sh 'terraform init -input=false' }
