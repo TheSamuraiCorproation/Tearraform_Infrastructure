@@ -3,7 +3,7 @@ terraform {
     bucket         = "thesamuraibucket"
     key            = "terraform/state.tfstate"
     region         = "eu-central-1"
-    use_lockfile   = true 
-
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
   }
 }

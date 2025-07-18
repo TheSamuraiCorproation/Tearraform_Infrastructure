@@ -6,7 +6,7 @@
 .terraform/providers/
 terraform-provider-*
 .terraform.lock.hcl
-
+secrets.txt
 # Terraform variable files
 *.tfvars
 pipeline/*.tfvars
