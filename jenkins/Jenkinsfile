@@ -14,7 +14,6 @@ pipeline {
         git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
       }
     }
-
     stage('Terraform Init') {
       steps {
         withCredentials([[
@@ -27,7 +26,6 @@ pipeline {
         }
       }
     }
-
     stage('Terraform Apply') {
       steps {
         withCredentials([[
@@ -40,13 +38,18 @@ pipeline {
         }
       }
     }
-
     stage('Archive Outputs') {
       steps {
-        sh 'terraform output -json > outputs.json'
-        archiveArtifacts artifacts: 'outputs.json'
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          sh 'terraform output -json > outputs.json'
+          archiveArtifacts artifacts: 'outputs.json'
+        }
       }
     }
   }
 }
-
