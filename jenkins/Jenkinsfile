@@ -38,6 +38,21 @@ pipeline {
         }
       }
     }
+    stage('Generate Key Pair') {
+  steps {
+    withCredentials([[
+      $class: 'AmazonWebServicesCredentialsBinding',
+      credentialsId: 'aws-terraform-creds',
+      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+    ]]) {
+      sh '''
+        aws ec2 create-key-pair --key-name client-access-key --query 'KeyMaterial' --output text > client-access-key.pem
+        chmod 400 client-access-key.pem
+      '''
+  	 }	
+        }
+       }
     stage('Archive Outputs') {
       steps {
         withCredentials([[
