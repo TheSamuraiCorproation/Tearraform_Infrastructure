@@ -38,7 +38,7 @@ pipeline {
         }
       }
     }
-    stage('Generate Key Pair') {
+stage('Generate Key Pair') {
   steps {
     withCredentials([[
       $class: 'AmazonWebServicesCredentialsBinding',
@@ -47,12 +47,16 @@ pipeline {
       secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
     ]]) {
       sh '''
-        aws ec2 create-key-pair --key-name client-access-key --query 'KeyMaterial' --output text > client-access-key.pem
+        if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
+          aws ec2 create-key-pair --key-name client-access-key --query 'KeyMaterial' --output text > client-access-key.pem
+        else
+          echo "Key pair client-access-key already exists, skipping creation."
+        fi
         chmod 400 client-access-key.pem
       '''
-  	 }	
-        }
-       }
+    }
+  }
+}
     stage('Archive Outputs') {
       steps {
         withCredentials([[
