@@ -5,6 +5,7 @@ resource "aws_instance" "this" {
   instance_type          = each.value.instance_type
   user_data              = each.value.user_data
   vpc_security_group_ids = each.value.security_groups
+  key_name               = each.value.key_name 
   tags = merge(
     {
       Name = each.value.name

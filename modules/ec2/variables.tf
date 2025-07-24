@@ -6,6 +6,7 @@ variable "instances" {
     user_data          = string
     name               = string
     security_groups    = list(string)
+    key_name        = string 
     tags               = map(string)
     compliance_requirements = list(string)
   }))
