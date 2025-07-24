@@ -63,7 +63,7 @@ variable "jenkins_token" {
 
        environment {
          variables = {
-           JENKINS_URL       = "https://1a8567d16b35.ngrok-free.app"
+           JENKINS_URL       = "https://9216d38c2a3f.ngrok-free.app
            JOB_NAME          = "terraform-deploy"
            JENKINS_TOKEN     = var.jenkins_token
            JENKINS_USER      = var.jenkins_user
