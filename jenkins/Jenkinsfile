@@ -39,22 +39,18 @@ pipeline {
       }
     }
 stage('Generate Key Pair') {
-  steps {
-    withCredentials([[
-      $class: 'AmazonWebServicesCredentialsBinding',
-      credentialsId: 'aws-terraform-creds',
-      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-    ]]) {
-      sh '''
-        if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
-          aws ec2 create-key-pair --key-name client-access-key --query 'KeyMaterial' --output text > client-access-key.pem
-        else
-          echo "Key pair client-access-key already exists, skipping creation."
-        fi
-        chmod 400 client-access-key.pem
-      '''
-    }
+  withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+    sh '''
+      # Check if key pair exists
+      if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
+        aws ec2 create-key-pair --key-name client-access-key --region eu-central-1 --query 'KeyMaterial' --output text > /tmp/client-access-key.pem
+        chmod 400 /tmp/client-access-key.pem
+        # Copy to a secure location if needed (e.g., Jenkins home or S3)
+        cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
+      else
+        echo "Key pair client-access-key already exists"
+      fi
+    '''
   }
 }
     stage('Archive Outputs') {
