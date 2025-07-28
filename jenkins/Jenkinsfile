@@ -97,16 +97,16 @@ pipeline {
               def instructions = """
               *VM Deployment Details (ThesamuraiDojo)*
               Your VMs have been deployed. Use the following SSH commands to connect:
-              \`\`\`
+              \\`\\`\\`
               ${ssh_commands}
-              \`\`\`
+              \\`\\`\\`
               Instructions:
               1. Save the attached client-access-key.pem file.
               2. Set permissions: chmod 400 client-access-key.pem
               3. Run each command above from your terminal for the respective VM.
               *Attachment*: Download from ${env.BUILD_URL}artifact/client-access-key.pem
               """
-              slackSend(channel: "#send-creds", // Replace with your channel or @username
+              slackSend(channel: "#send-creds", // Your existing channel
                         color: "good",
                         message: instructions)
             }
