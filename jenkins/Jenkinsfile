@@ -83,11 +83,13 @@ pipeline {
                          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
           script {
             dir("${WORKSPACE}") {
-              def instance_dns = sh(script: "terraform output -json | jq -r '.instance_public_dns[]'", returnStdout: true).trim()
+              // Extract the first public IP from ec2_public_ips map
+              def instance_dns = sh(script: "terraform output -json | jq -r '.ec2_public_ips | values[]' | head -n 1", returnStdout: true).trim()
               if (!instance_dns) {
                 error "Failed to retrieve instance DNS from Terraform output."
               }
-              def client_email = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'", returnStdout: true).trim()
+              // Extract the first client_email from the nested instances structure
+              def client_email = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.instances[] | .client_email' | select(. != null) | head -n 1", returnStdout: true).trim()
               if (!client_email || client_email == 'null') {
                 error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
               }
