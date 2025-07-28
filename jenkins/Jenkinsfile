@@ -76,8 +76,7 @@ pipeline {
     }
     stage('Send SSH Details') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'gmail-smtp-creds', usernameVariable: 'SMTP_USERNAME', passwordVariable: 'SMTP_PASSWORD'),
-                        [$class: 'AmazonWebServicesCredentialsBinding',
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
                          credentialsId: 'aws-terraform-creds',
                          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
@@ -88,7 +87,7 @@ pipeline {
               if (!instance_dns) {
                 error "Failed to retrieve instance DNS from Terraform output."
               }
-              // Extract the top-level client_email
+              // Extract the top-level client_email (used as a fallback identifier)
               def client_email = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'", returnStdout: true).trim()
               if (!client_email || client_email == 'null') {
                 error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
@@ -99,21 +98,20 @@ pipeline {
                 "ssh -i client-access-key.pem ubuntu@${ip}"
               }.join('\n')
               def instructions = """
+              *VM Deployment Details (ThesamuraiDojo)*
               Your VMs have been deployed. Use the following SSH commands to connect:
+              \`\`\`
               ${ssh_commands}
+              \`\`\`
               Instructions:
               1. Save the attached client-access-key.pem file.
               2. Set permissions: chmod 400 client-access-key.pem
               3. Run each command above from your terminal for the respective VM.
+              *Attachment*: Download from ${env.BUILD_URL}artifact/client-access-key.pem
               """
-              // Use a simpler emailext configuration with global SMTP settings
-              emailext (
-                to: client_email,
-                subject: "VM Deployment - SSH Access Details",
-                body: instructions,
-                mimeType: 'text/plain',
-                attachmentsPattern: '**/*client-access-key.pem'
-              )
+              slackSend(channel: "#deployments", // Replace with your Slack channel or @username
+                        color: "good",
+                        message: instructions)
             }
           }
         }
