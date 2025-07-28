@@ -82,17 +82,14 @@ pipeline {
                          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
           script {
             dir("${WORKSPACE}") {
-              // Extract all public IPs from ec2_public_ips map
               def instance_dns = sh(script: "terraform output -json | jq -r '.ec2_public_ips | values[]'", returnStdout: true).trim()
               if (!instance_dns) {
                 error "Failed to retrieve instance DNS from Terraform output."
               }
-              // Extract the top-level client_email (used as a fallback identifier)
               def client_email = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'", returnStdout: true).trim()
               if (!client_email || client_email == 'null') {
                 error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
               }
-              // Generate SSH commands for each IP
               def ip_list = instance_dns.split('\n')
               def ssh_commands = ip_list.collect { ip ->
                 "ssh -i client-access-key.pem ubuntu@${ip}"
@@ -109,7 +106,7 @@ pipeline {
               3. Run each command above from your terminal for the respective VM.
               *Attachment*: Download from ${env.BUILD_URL}artifact/client-access-key.pem
               """
-              slackSend(channel: "#deployments", // Replace with your Slack channel or @username
+              slackSend(channel: "#deployments", // Replace with your channel or @username
                         color: "good",
                         message: instructions)
             }
