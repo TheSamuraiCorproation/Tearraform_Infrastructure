@@ -106,19 +106,13 @@ pipeline {
               2. Set permissions: chmod 400 client-access-key.pem
               3. Run each command above from your terminal for the respective VM.
               """
+              // Use a simpler emailext configuration with global SMTP settings
               emailext (
                 to: client_email,
                 subject: "VM Deployment - SSH Access Details",
                 body: instructions,
                 mimeType: 'text/plain',
-                attachmentsPattern: '**/*client-access-key.pem', // Corrected Ant GLOB pattern
-                configType: 'smtpServer', // Use SMTP server configuration
-                smtpHost: 'smtp.gmail.com',
-                smtpPort: '587',
-                useSsl: false,
-                useTls: true,
-                authUsernameVariable: 'SMTP_USERNAME',
-                authPasswordVariable: 'SMTP_PASSWORD'
+                attachmentsPattern: '**/*client-access-key.pem'
               )
             }
           }
