@@ -76,15 +76,17 @@ pipeline {
     }
     stage('Send SSH Details') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'gmail-smtp-creds', usernameVariable: 'SMTP_USERNAME', passwordVariable: 'SMTP_PASSWORD')]) {
+        withCredentials([usernamePassword(credentialsId: 'gmail-smtp-creds', usernameVariable: 'SMTP_USERNAME', passwordVariable: 'SMTP_PASSWORD'),
+                        [$class: 'AmazonWebServicesCredentialsBinding',
+                         credentialsId: 'aws-terraform-creds',
+                         accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                         secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
           script {
-            // Ensure Terraform output is available
             dir("${WORKSPACE}") {
               def instance_dns = sh(script: "terraform output -json | jq -r '.instance_public_dns[]'", returnStdout: true).trim()
               if (!instance_dns) {
                 error "Failed to retrieve instance DNS from Terraform output."
               }
-              // Retrieve client email from S3 with error handling
               def client_email = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'", returnStdout: true).trim()
               if (!client_email || client_email == 'null') {
                 error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
@@ -118,7 +120,6 @@ pipeline {
   }
   post {
     always {
-      // Clean up temporary files if needed
       sh 'rm -f /tmp/client-access-key.pem outputs.json || true'
     }
     failure {
