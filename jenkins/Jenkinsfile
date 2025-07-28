@@ -106,7 +106,7 @@ pipeline {
               3. Run each command above from your terminal for the respective VM.
               *Attachment*: Download from ${env.BUILD_URL}artifact/client-access-key.pem
               """
-              slackSend(channel: "#deployments", // Replace with your channel or @username
+              slackSend(channel: "#send-creds", // Replace with your channel or @username
                         color: "good",
                         message: instructions)
             }
