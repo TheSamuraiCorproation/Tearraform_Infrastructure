@@ -111,12 +111,14 @@ pipeline {
                 subject: "VM Deployment - SSH Access Details",
                 body: instructions,
                 mimeType: 'text/plain',
-                attachmentsPattern: '/var/lib/jenkins/client-access-key.pem',
-                serverName: 'smtp.gmail.com',
-                serverPort: '587',
+                attachmentsPattern: '**/*client-access-key.pem', // Corrected Ant GLOB pattern
+                configType: 'smtpServer', // Use SMTP server configuration
+                smtpHost: 'smtp.gmail.com',
+                smtpPort: '587',
+                useSsl: false,
                 useTls: true,
-                authUsername: "${SMTP_USERNAME}",
-                authPassword: "${SMTP_PASSWORD}"
+                authUsernameVariable: 'SMTP_USERNAME',
+                authPasswordVariable: 'SMTP_PASSWORD'
               )
             }
           }
