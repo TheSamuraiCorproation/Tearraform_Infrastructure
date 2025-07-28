@@ -1,19 +1,23 @@
 pipeline {
   agent any
+
   parameters {
     string(name: 'BUCKET', defaultValue: 'thesamuraibucket', description: 'S3 bucket name')
-    string(name: 'KEY', defaultValue: '', description: 'S3 object key')
+    string(name: 'KEY',    defaultValue: '',               description: 'S3 object key')
   }
+
   environment {
     AWS_DEFAULT_REGION = 'eu-central-1'
-    JENKINS_URL = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
+    JENKINS_URL       = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
   }
+
   stages {
     stage('Checkout') {
       steps {
         git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
       }
     }
+
     stage('Terraform Init') {
       steps {
         withCredentials([[
@@ -26,6 +30,7 @@ pipeline {
         }
       }
     }
+
     stage('Terraform Apply') {
       steps {
         withCredentials([[
@@ -34,10 +39,17 @@ pipeline {
           accessKeyVariable: 'AWS_ACCESS_KEY_ID',
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
-          sh "terraform apply -var 's3_payload_bucket=${BUCKET}' -var 's3_payload_key=${KEY}' -var 'jenkins_url=${JENKINS_URL}' -auto-approve"
+          sh """
+            terraform apply \
+              -var 's3_payload_bucket=${BUCKET}' \
+              -var 's3_payload_key=${KEY}' \
+              -var 'jenkins_url=${JENKINS_URL}' \
+              -auto-approve
+          """
         }
       }
     }
+
     stage('Generate Key Pair') {
       steps {
         withCredentials([[
@@ -47,11 +59,20 @@ pipeline {
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
           sh '''
-            # Check if key pair exists
-            if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
-              aws ec2 create-key-pair --key-name client-access-key --region eu-central-1 --query 'KeyMaterial' --output text > /tmp/client-access-key.pem
+            # Create key if it doesn't exist
+            if ! aws ec2 describe-key-pairs \
+                  --key-names client-access-key \
+                  --region eu-central-1 >/dev/null 2>&1; then
+
+              aws ec2 create-key-pair \
+                --key-name client-access-key \
+                --region eu-central-1 \
+                --query 'KeyMaterial' --output text \
+                > /tmp/client-access-key.pem
+
               chmod 400 /tmp/client-access-key.pem
-              # Copy to a secure location accessible by Jenkins
+
+              # Copy to Jenkins home
               sudo cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
               sudo chmod 400 /var/lib/jenkins/client-access-key.pem
             else
@@ -61,6 +82,7 @@ pipeline {
         }
       }
     }
+
     stage('Archive Outputs') {
       steps {
         withCredentials([[
@@ -74,56 +96,72 @@ pipeline {
         }
       }
     }
+
     stage('Send SSH Details') {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                         credentialsId: 'aws-terraform-creds',
-                         accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                         secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+        // bring the PEM file into the workspace so it can be attached
+        sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
+
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
           script {
-            dir("${WORKSPACE}") {
-              def instance_dns = sh(script: "terraform output -json | jq -r '.ec2_public_ips | values[]'", returnStdout: true).trim()
-              if (!instance_dns) {
-                error "Failed to retrieve instance DNS from Terraform output."
-              }
-              def client_email = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'", returnStdout: true).trim()
-              if (!client_email || client_email == 'null') {
-                error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
-              }
-              def ip_list = instance_dns.split('\n')
-              def ssh_commands = ip_list.collect { ip ->
-                "ssh -i client-access-key.pem ubuntu@${ip}"
-              }.join('\n')
-              def instructions = """
-              *VM Deployment Details (ThesamuraiDojo)*
-              Your VMs have been deployed. Use the following SSH commands to connect:
-              \\`\\`\\`
-              ${ssh_commands}
-              \\`\\`\\`
-              Instructions:
-              1. Save the attached client-access-key.pem file.
-              2. Set permissions: chmod 400 client-access-key.pem
-              3. Run each command above from your terminal for the respective VM.
-              *Attachment*: Download from ${env.BUILD_URL}artifact/client-access-key.pem
-              """
-              slackSend(channel: "#send-creds", // Your existing channel
-                        color: "good",
-                        message: instructions)
-            }
+            // 1) Gather the EC2 public IPs
+            def ips = sh(
+              script: "terraform output -json | jq -r '.ec2_public_ips | values[]'",
+              returnStdout: true
+            ).trim().split('\n')
+
+            // 2) Build SSH commands
+            def sshCommands = ips.collect { ip ->
+              "ssh -i client-access-key.pem ubuntu@${ip}"
+            }.join('\n')
+
+            // 3) Pull recipient email from S3 payload
+            def clientEmail = sh(
+              script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'",
+              returnStdout: true
+            ).trim()
+
+            // 4) Send the email with the key attached
+            emailext(
+              to:                 clientEmail,
+              subject:            "🔑 Your VM SSH Credentials (Build #${BUILD_NUMBER})",
+              body:               """\
+Hello!
+
+Your EC2 instance is up and running. To connect, use:
+
+${sshCommands}
+
+You can download your private key below or use the attached file.
+Download link: ${env.BUILD_URL}artifact/client-access-key.pem
+
+Cheers,
+Jenkins
+""",
+              attachmentsPattern: 'client-access-key.pem',
+              mimeType:           'text/plain'
+            )
           }
         }
       }
     }
-  }
+  } // <-- closes stages
+
   post {
     always {
-      sh 'rm -f /tmp/client-access-key.pem outputs.json || true'
-    }
-    failure {
-      echo "Pipeline failed. Check logs for details."
+      sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem || true'
     }
     success {
       echo "Pipeline completed successfully!"
     }
+    failure {
+      echo "Pipeline failed. Check logs for details."
+    }
   }
 }
+
