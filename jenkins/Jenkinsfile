@@ -39,22 +39,28 @@ pipeline {
       }
     }
     stage('Generate Key Pair') {
-  steps {
-    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-terraform-creds']]) {
-      sh '''
-        # Check if key pair exists
-        if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
-          aws ec2 create-key-pair --key-name client-access-key --region eu-central-1 --query 'KeyMaterial' --output text > /tmp/client-access-key.pem
-          chmod 400 /tmp/client-access-key.pem
-          # Copy to a secure location
-          cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
-        else
-          echo "Key pair client-access-key already exists"
-        fi
-      '''
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          sh '''
+            # Check if key pair exists
+            if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
+              aws ec2 create-key-pair --key-name client-access-key --region eu-central-1 --query 'KeyMaterial' --output text > /tmp/client-access-key.pem
+              chmod 400 /tmp/client-access-key.pem
+              # Copy to a secure location accessible by Jenkins
+              sudo cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
+              sudo chmod 400 /var/lib/jenkins/client-access-key.pem
+            else
+              echo "Key pair client-access-key already exists"
+            fi
+          '''
+        }
+      }
     }
-  }
-}
     stage('Archive Outputs') {
       steps {
         withCredentials([[
@@ -67,6 +73,59 @@ pipeline {
           archiveArtifacts artifacts: 'outputs.json'
         }
       }
+    }
+    stage('Send SSH Details') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'gmail-smtp-creds', usernameVariable: 'SMTP_USERNAME', passwordVariable: 'SMTP_PASSWORD')]) {
+          script {
+            // Ensure Terraform output is available
+            dir("${WORKSPACE}") {
+              def instance_dns = sh(script: "terraform output -json | jq -r '.instance_public_dns[]'", returnStdout: true).trim()
+              if (!instance_dns) {
+                error "Failed to retrieve instance DNS from Terraform output."
+              }
+              // Retrieve client email from S3 with error handling
+              def client_email = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'", returnStdout: true).trim()
+              if (!client_email || client_email == 'null') {
+                error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
+              }
+              def ssh_command = "ssh -i client-access-key.pem ubuntu@${instance_dns}"
+              def instructions = """
+              Your VM has been deployed. Use the following SSH command to connect:
+              ${ssh_command}
+              Instructions:
+              1. Save the attached client-access-key.pem file.
+              2. Set permissions: chmod 400 client-access-key.pem
+              3. Run the command above from your terminal.
+              """
+              emailext (
+                to: client_email,
+                subject: "VM Deployment - SSH Access Details",
+                body: instructions,
+                mimeType: 'text/plain',
+                attachmentsPattern: '/var/lib/jenkins/client-access-key.pem',
+                serverName: 'smtp.gmail.com',
+                serverPort: '587',
+                useTls: true,
+                authUsername: "${SMTP_USERNAME}",
+                authPassword: "${SMTP_PASSWORD}"
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+  post {
+    always {
+      // Clean up temporary files if needed
+      sh 'rm -f /tmp/client-access-key.pem outputs.json || true'
+    }
+    failure {
+      echo "Pipeline failed. Check logs for details."
+    }
+    success {
+      echo "Pipeline completed successfully!"
     }
   }
 }
