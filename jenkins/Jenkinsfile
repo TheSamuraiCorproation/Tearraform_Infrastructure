@@ -143,6 +143,10 @@ Your EC2 instance is up and running. Follow these steps:
 
 Type “yes” if prompted.
 
+### Troubleshooting
+- Ensure the IP (${instance_ip}) is correct and port 22 is open.
+- Verify key permissions with `ls -l client-access-key.pem`.
+
 Cheers,  
 The Apollo Dojo Samurai Team
 """,
