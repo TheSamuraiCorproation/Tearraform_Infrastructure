@@ -8,7 +8,7 @@ pipeline {
 
   environment {
     AWS_DEFAULT_REGION = 'eu-central-1'
-    JENKINS_URL       = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
+    JENKINS_URL        = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
   }
 
   stages {
@@ -59,20 +59,12 @@ pipeline {
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
           sh '''
-            # Create key if it doesn't exist
-            if ! aws ec2 describe-key-pairs \
-                  --key-names client-access-key \
-                  --region eu-central-1 >/dev/null 2>&1; then
-
-              aws ec2 create-key-pair \
-                --key-name client-access-key \
-                --region eu-central-1 \
-                --query 'KeyMaterial' --output text \
+            if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
+              aws ec2 create-key-pair --key-name client-access-key \
+                --region eu-central-1 --query 'KeyMaterial' --output text \
                 > /tmp/client-access-key.pem
 
               chmod 400 /tmp/client-access-key.pem
-
-              # Copy to Jenkins home
               sudo cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
               sudo chmod 400 /var/lib/jenkins/client-access-key.pem
             else
@@ -98,67 +90,66 @@ pipeline {
     }
 
     stage('Send SSH Details') {
-  steps {
-    // 1) Copy the key into the workspace
-    sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
-    // 2) Archive it so Jenkins will host it under /artifact/
-    archiveArtifacts artifacts: 'client-access-key.pem'
+      steps {
+        // 1) Copy the key into the workspace and archive it
+        sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
+        archiveArtifacts artifacts: 'client-access-key.pem'
 
-    withCredentials([[
-      $class: 'AmazonWebServicesCredentialsBinding',
-      credentialsId: 'aws-terraform-creds',
-      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-    ]]) {
-      script {
-        // 3) Correctly pull only the IP addresses
-        def ips = sh(
-          script: "terraform output -json | jq -r '.ec2_public_ips | .[]'",
-          returnStdout: true
-        ).trim().split('\n')
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          script {
+            // 2) Extract IPs
+            def ips = sh(
+              script: "terraform output -json | jq -r '.ec2_public_ips | .[]'",
+              returnStdout: true
+            ).trim().split('\n')
 
-        // 4) Build step-by-step SSH commands
-        def sshCommands = ips.collectIndexed { idx, ip ->
-          "${idx+1}. ssh -i client-access-key.pem ubuntu@${ip}"
-        }.join('\n')
+            // 3) Build numbered SSH commands
+            def sshCommands = ips.withIndex().collect { ip, idx ->
+              "${idx + 1}. ssh -i client-access-key.pem ubuntu@${ip}"
+            }.join('\n')
 
-        // 5) Pull the email address out of your S3 JSON payload
-        def clientEmail = sh(
-          script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'",
-          returnStdout: true
-        ).trim()
+            // 4) Read client email from S3 payload
+            def clientEmail = sh(
+              script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'",
+              returnStdout: true
+            ).trim()
 
-        // 6) Compute a downloadable URL for the PEM (hosted by Jenkins)
-        def downloadUrl = "${env.BUILD_URL}artifact/client-access-key.pem"
+            // 5) Compute download URL
+            def downloadUrl = "${env.BUILD_URL}artifact/client-access-key.pem"
 
-        // 7) Send the mail
-        mail(
-          to:         clientEmail,
-          replyTo:    'no‑reply@apollo‑dojo.com',       // avoids “address not configured” fallback
-          subject:    "🔑 Your VM SSH Credentials (Job #${BUILD_NUMBER})",
-          body:       """\
+            // 6) Send email
+            mail(
+              to:      clientEmail,
+              replyTo: 'no-reply@apollo-dojo.com',
+              subject: "🔑 Your VM SSH Credentials (Job #${BUILD_NUMBER})",
+              body:   """\
 Hello,
 
-Your EC2 instance has been deployed. To connect:
+Your EC2 instance has been deployed. To connect, follow these steps:
 
 ${sshCommands}
 
 Next steps:
-1. Download your private key:  
-   ${downloadUrl}  
-2. Secure it:  
-   chmod 400 client-access-key.pem  
+1. Download your private key:
+   ${downloadUrl}
+2. Secure it:
+   chmod 400 client-access-key.pem
 3. Run the SSH command(s) above.
 
-—  
+—
 The Apollo Dojo Samurai Team
 """
-        )
+            )
+          }
+        }
       }
     }
-  }
-}
-
+  } // end stages
 
   post {
     always {
