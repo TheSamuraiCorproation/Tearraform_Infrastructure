@@ -90,46 +90,55 @@ pipeline {
     }
 
     stage('Send SSH Details') {
-  steps {
-    // 1) Copy the key into the workspace and archive it
-    sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
-    archiveArtifacts artifacts: 'client-access-key.pem'
+      steps {
+        // 1) Copy the key into the workspace and archive it
+        sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
+        archiveArtifacts artifacts: 'client-access-key.pem'
 
-    withCredentials([[
-      $class: 'AmazonWebServicesCredentialsBinding',
-      credentialsId: 'aws-terraform-creds',
-      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-    ]]) {
-      script {
-        // 2) Extract the EC2 public IP (targeting opendlp-vm)
-        def instance_dns_json = sh(script: "terraform output -json ec2_public_ips", returnStdout: true).trim()
-        if (!instance_dns_json) {
-          error "Failed to retrieve instance DNS from Terraform output."
-        }
-        def instance_ip = sh(script: "echo '${instance_dns_json}' | jq -r '.\"opendlp-vm\"'", returnStdout: true).trim()
-        if (!instance_ip || instance_ip == 'null' || instance_ip == 'false') {
-          error "Failed to extract valid IP from Terraform output. Got: ${instance_ip}"
-        }
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          script {
+            // 2) Extract the EC2 public IP (targeting opendlp-vm)
+            def instance_dns_json = sh(
+              script: "terraform output -json ec2_public_ips",
+              returnStdout: true
+            ).trim()
+            if (!instance_dns_json) {
+              error "Failed to retrieve instance DNS from Terraform output."
+            }
+            def instance_ip = sh(
+              script: "echo '${instance_dns_json}' | jq -r '.\"opendlp-vm\"'",
+              returnStdout: true
+            ).trim()
+            if (!instance_ip || instance_ip == 'null' || instance_ip == 'false') {
+              error "Failed to extract valid IP from Terraform output. Got: ${instance_ip}"
+            }
 
-        // 3) Pull recipient email from S3 payload
-        def clientEmail = sh(script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'", returnStdout: true).trim()
-        if (!clientEmail || clientEmail == 'null') {
-          error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
-        }
+            // 3) Pull recipient email from S3 payload
+            def clientEmail = sh(
+              script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'",
+              returnStdout: true
+            ).trim()
+            if (!clientEmail || clientEmail == 'null') {
+              error "Failed to retrieve client email from S3 object s3://${BUCKET}/${KEY}."
+            }
 
-        // 4) Build SSH command
-        def sshCommand = "ssh -i client-access-key.pem ubuntu@${instance_ip}"
+            // 4) Build SSH command
+            def sshCommand = "ssh -i client-access-key.pem ubuntu@${instance_ip}"
 
-        // 5) Compute download URL
-        def downloadUrl = "${env.BUILD_URL}artifact/client-access-key.pem"
+            // 5) Compute download URL
+            def downloadUrl = "${env.BUILD_URL}artifact/client-access-key.pem"
 
-        // 6) Send email with step-by-step instructions
-        mail(
-          to: clientEmail,
-          replyTo: 'no-reply@apollo-dojo.com',
-          subject: "🔑 Your VM SSH Credentials (Job #${BUILD_NUMBER})",
-          body: """\
+            // 6) Send email with step-by-step instructions
+            mail(
+              to:       clientEmail,
+              replyTo:  'no-reply@apollo-dojo.com',
+              subject:  "🔑 Your VM SSH Credentials (Job #${BUILD_NUMBER})",
+              body:     """\
 Subject: 🔑 Your EC2 Instance is Ready - Apollo Dojo Samurai Team (Build #${BUILD_NUMBER})
 
 Hello ${clientEmail},
@@ -139,40 +148,30 @@ Your EC2 instance, deployed by the Apollo Dojo Samurai Team, is up and running. 
 ### Step-by-Step Guide to Connect to Your VM
 1. **Download the Private Key**:
    - The private key file (client-access-key.pem) is attached to this email.
-   - Alternatively, download it from: ${downloadUrl} (Note: This link may require Jenkins access; use the attachment if it fails.)
+   - Alternatively, download it from: ${downloadUrl}
 
 2. **Set Permissions on the Key**:
-   - Save the client-access-key.pem file to a secure location on your computer.
-   - Open a terminal and run:
-     \`\`\`
-     chmod 400 client-access-key.pem
-     \`\`\`
+   Save the file and run:
+   chmod 400 client-access-key.pem
 
 3. **Connect to the Instance**:
-   - Use the following SSH command to connect to your VM:
-     \`\`\`
-     ${sshCommand}
-     \`\`\`
-   - Enter 'yes' if prompted to trust the host.
+   ${sshCommand}
+   (Type “yes” if prompted.)
 
-4. **Troubleshooting**:
-   - If the connection fails, ensure the IP (${instance_ip}) is correct and your network allows SSH (port 22).
-   - Verify the key permissions with \`ls -l client-access-key.pem\` (should show -r--------).
-
-### Additional Information
-- Instance Details: The VM is tagged as "TESSTSLck-vm" with OpenDLP installed.
-- Support: Contact the Apollo Dojo Samurai Team for assistance.
+### Troubleshooting
+- Ensure the IP (${instance_ip}) is correct and port 22 is open.
+- Verify key permissions with `ls -l client-access-key.pem`.
 
 Cheers,
 The Apollo Dojo Samurai Team
 """,
-          mimeType: 'text/plain',
-          attachments: 'client-access-key.pem'
-        )
+              mimeType: 'text/plain'
+            )
+          }
+        }
       }
     }
-  }
-}
+
   } // end stages
 
   post {
@@ -186,5 +185,6 @@ The Apollo Dojo Samurai Team
       echo "Pipeline failed. Check logs for details."
     }
   }
-}
+
+} // end pipeline
 
