@@ -90,76 +90,67 @@ pipeline {
     }
 
     stage('Send SSH Details') {
-  steps {
-    // 1) Copy the key into the workspace and archive it
-    sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
-    archiveArtifacts artifacts: 'client-access-key.pem'
+      steps {
+        // 1) Copy the key into the workspace and archive it
+        sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
+        archiveArtifacts artifacts: 'client-access-key.pem'
 
-    withCredentials([[
-      $class: 'AmazonWebServicesCredentialsBinding',
-      credentialsId: 'aws-terraform-creds',
-      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-    ]]) {
-      script {
-        // 2) Get the opendlp-vm IP
-        def ip = sh(
-          script: "terraform output -json ec2_public_ips | jq -r '.\"opendlp-vm\"'",
-          returnStdout: true
-        ).trim()
-        if (!ip) error("No IP found for opendlp‑vm")
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          script {
+            // 2) Get the opendlp-vm IP
+            def ip = sh(
+              script: "terraform output -json ec2_public_ips | jq -r '.\"opendlp-vm\"'",
+              returnStdout: true
+            ).trim()
+            if (!ip) error("No IP found for opendlp-vm")
 
-        // 3) Load the recipient from S3
-        def clientEmail = sh(
-          script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'",
-          returnStdout: true
-        ).trim()
-        if (!clientEmail) error("No client_email in S3 payload")
+            // 3) Load the recipient from S3
+            def clientEmail = sh(
+              script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'",
+              returnStdout: true
+            ).trim()
+            if (!clientEmail) error("No client_email in S3 payload")
 
-        // 4) Compute a public download URL using your Jenkins system URL:
-        //    Make sure “Jenkins URL” in Manage Jenkins → Configure System
-        //    is set to your ngrok address (e.g. https://9216d38c2a3f.ngrok-free.app)
-        def downloadUrl = "${env.JENKINS_URL}job/${env.JOB_NAME}/${env.BUILD_NUMBER}/artifact/client-access-key.pem"
-
-        // 5) Send via Email‑Extension with attachment
-        emailext(
-          to:                 clientEmail,
-          replyTo:            'no-reply@apollo-dojo.com',
-          subject:            "🔑 Your VM SSH Credentials (Build #${BUILD_NUMBER})",
-          body:               """\
+            // 4) Send via Email-Extension with attachment
+            emailext(
+              to:       clientEmail,
+              replyTo:  'no-reply@apollo-dojo.com',
+              subject:  "🔑 Your VM SSH Credentials",
+              body:     """\
 Hello,
 
 Your EC2 instance is up and running. Follow these steps:
 
 1) Download the private key (attached):
-   client-access-key.pem  
-   Or via browser: ${downloadUrl}
+   client-access-key.pem
 
 2) Secure the key:
-   chmod 400 client-access-key.pem
+chmod 400 client-access-key.pem
 
 3) Connect over SSH:
-   ssh -i client-access-key.pem ubuntu@${ip}
-
+ssh -i client-access-key.pem ubuntu@${ip}
 Type “yes” if prompted.
 
 ### Troubleshooting
-- Ensure the IP (${instance_ip}) is correct and port 22 is open.
-- Verify key permissions with `ls -l client-access-key.pem`.
+- Ensure the IP (${ip}) is correct and port 22 is open.
+- Verify key permissions with \`ls -l client-access-key.pem\`.
 
 Cheers,  
 The Apollo Dojo Samurai Team
 """,
-          attachmentsPattern: 'client-access-key.pem',
-          mimeType:           'text/plain'
-        )
+              attachmentsPattern: 'client-access-key.pem',
+              mimeType:           'text/plain'
+            )
+          }
+        }
       }
     }
   }
-}
-
-
-  } // end stages
 
   post {
     always {
@@ -172,6 +163,5 @@ The Apollo Dojo Samurai Team
       echo "Pipeline failed. Check logs for details."
     }
   }
-
-} // end pipeline
+}
 
