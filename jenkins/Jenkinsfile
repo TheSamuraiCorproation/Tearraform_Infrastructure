@@ -80,49 +80,56 @@ pipeline {
     }
 
     stage('Install Tools with Ansible') {
-      steps {
-        script {
-          // Download JSON from S3
-          sh "aws s3 cp s3://${BUCKET}/${KEY} payload.json"
+  steps {
+    withCredentials([[
+      $class: 'AmazonWebServicesCredentialsBinding',
+      credentialsId: 'aws-terraform-creds',
+      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+    ]]) {
+      script {
+        // Download JSON from S3
+        sh "aws s3 cp s3://${BUCKET}/${KEY} payload.json"
 
-          // Read JSON
-          def payload = readJSON file: 'payload.json'
+        // Read JSON
+        def payload = readJSON file: 'payload.json'
 
-          // Get instance key (assuming one instance)
-          def instance_key = payload.instances.keySet()[0]
+        // Get instance key (assuming one instance)
+        def instance_key = payload.instances.keySet()[0]
 
-          // Get public IP
-          def ip = sh(
-            script: "terraform output -json public_ips | jq -r '.\"${instance_key}\"'",
-            returnStdout: true
-          ).trim()
-          if (!ip) error("No IP found for instance ${instance_key}")
+        // Get public IP
+        def ip = sh(
+          script: "terraform output -json public_ips | jq -r '.\"${instance_key}\"'",
+          returnStdout: true
+        ).trim()
+        if (!ip) error("No IP found for instance ${instance_key}")
 
-          // Get tools list
-          def toolsList = payload.instances[instance_key].tools_to_install
+        // Get tools list
+        def toolsList = payload.instances[instance_key].tools_to_install
 
-          // Create inventory file
-          writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
+        // Create inventory file
+        writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
 
-          // Wait for SSH
-          sh """
-          until ssh -i client-access-key.pem -o StrictHostKeyChecking=no ubuntu@${ip} 'echo SSH is up'; do
-            echo "Waiting for SSH..."
-            sleep 10
-          done
-          """
+        // Wait for SSH
+        sh """
+        until ssh -i client-access-key.pem -o StrictHostKeyChecking=no ubuntu@${ip} 'echo SSH is up'; do
+          echo "Waiting for SSH..."
+          sleep 10
+        done
+        """
 
-          // Run Ansible
-          ansiblePlaybook(
-            playbook: 'ansible/install_tools.yml',
-            inventory: 'inventory.ini',
-            extraVars: [
-              tools_to_install: toolsList
-            ]
-          )
-        }
+        // Run Ansible
+        ansiblePlaybook(
+          playbook: 'ansible/install_tools.yml',
+          inventory: 'inventory.ini',
+          extraVars: [
+            tools_to_install: toolsList
+          ]
+        )
       }
     }
+  }
+}
 
     stage('Archive Outputs') {
       steps {
