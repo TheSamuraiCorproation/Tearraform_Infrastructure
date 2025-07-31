@@ -7,7 +7,7 @@ variable "instances" {
     name               = string
     security_groups    = list(string)
     key_name           = string
-    tags               = map(string)
+    tags               = optional(map(string))
     compliance_requirements = optional(list(string))
     tools_to_install   = optional(list(string))
   }))
