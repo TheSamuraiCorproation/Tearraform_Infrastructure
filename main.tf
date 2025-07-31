@@ -11,7 +11,7 @@ locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
 }
 
-module "ec2_instances" {
+module "ec2" {
   source   = "./modules/ec2"
   instances = local.payload.instances
 }
