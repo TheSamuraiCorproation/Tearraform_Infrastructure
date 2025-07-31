@@ -18,6 +18,35 @@ pipeline {
       }
     }
 
+    stage('Ensure Key Pair') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          sh '''
+            if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
+              aws ec2 create-key-pair --key-name client-access-key \
+                --region eu-central-1 --query 'KeyMaterial' --output text \
+                > /tmp/client-access-key.pem
+
+              chmod 400 /tmp/client-access-key.pem
+              sudo cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
+              sudo chmod 400 /var/lib/jenkins/client-access-key.pem
+            else
+              echo "Key pair client-access-key already exists"
+            fi
+
+            # Copy to workspace
+            cp /var/lib/jenkins/client-access-key.pem client-access-key.pem
+            chmod 400 client-access-key.pem
+          '''
+        }
+      }
+    }
+
     stage('Terraform Init') {
       steps {
         withCredentials([[
@@ -50,27 +79,47 @@ pipeline {
       }
     }
 
-    stage('Generate Key Pair') {
+    stage('Install Tools with Ansible') {
       steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-terraform-creds',
-          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-          sh '''
-            if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
-              aws ec2 create-key-pair --key-name client-access-key \
-                --region eu-central-1 --query 'KeyMaterial' --output text \
-                > /tmp/client-access-key.pem
+        script {
+          // Download JSON from S3
+          sh "aws s3 cp s3://${BUCKET}/${KEY} payload.json"
 
-              chmod 400 /tmp/client-access-key.pem
-              sudo cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
-              sudo chmod 400 /var/lib/jenkins/client-access-key.pem
-            else
-              echo "Key pair client-access-key already exists"
-            fi
-          '''
+          // Read JSON
+          def payload = readJSON file: 'payload.json'
+
+          // Get instance key (assuming one instance)
+          def instance_key = payload.instances.keySet()[0]
+
+          // Get public IP
+          def ip = sh(
+            script: "terraform output -json public_ips | jq -r '.\"${instance_key}\"'",
+            returnStdout: true
+          ).trim()
+          if (!ip) error("No IP found for instance ${instance_key}")
+
+          // Get tools list
+          def toolsList = payload.instances[instance_key].tools_to_install
+
+          // Create inventory file
+          writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
+
+          // Wait for SSH
+          sh """
+          until ssh -i client-access-key.pem -o StrictHostKeyChecking=no ubuntu@${ip} 'echo SSH is up'; do
+            echo "Waiting for SSH..."
+            sleep 10
+          done
+          """
+
+          // Run Ansible
+          ansiblePlaybook(
+            playbook: 'ansible/install_tools.yml',
+            inventory: 'inventory.ini',
+            extraVars: [
+              tools_to_install: toolsList
+            ]
+          )
         }
       }
     }
@@ -91,37 +140,25 @@ pipeline {
 
     stage('Send SSH Details') {
       steps {
-        // 1) Copy the key into the workspace and archive it
-        sh 'cp /var/lib/jenkins/client-access-key.pem client-access-key.pem'
-        archiveArtifacts artifacts: 'client-access-key.pem'
+        script {
+          // Use existing payload.json from workspace
+          def payload = readJSON file: 'payload.json'
+          def instance_key = payload.instances.keySet()[0]
+          def ip = sh(
+            script: "terraform output -json public_ips | jq -r '.\"${instance_key}\"'",
+            returnStdout: true
+          ).trim()
+          def clientEmail = payload.client_email
 
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-terraform-creds',
-          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-          script {
-            // 2) Get the opendlp-vm IP
-            def ip = sh(
-              script: "terraform output -json ec2_public_ips | jq -r '.\"opendlp-vm\"'",
-              returnStdout: true
-            ).trim()
-            if (!ip) error("No IP found for opendlp-vm")
+          // Archive the key (already in workspace, just archive)
+          archiveArtifacts artifacts: 'client-access-key.pem'
 
-            // 3) Load the recipient from S3
-            def clientEmail = sh(
-              script: "aws s3 cp s3://${BUCKET}/${KEY} - | jq -r '.client_email'",
-              returnStdout: true
-            ).trim()
-            if (!clientEmail) error("No client_email in S3 payload")
-
-            // 4) Send via Email-Extension with attachment
-            emailext(
-  to:       clientEmail,
-  replyTo:  'no-reply@apollo-dojo.com',
-  subject:  "🔑 Your VM SSH Credentials",
-  body:     """\
+          // Send email
+          emailext(
+            to:       clientEmail,
+            replyTo:  'no-reply@apollo-dojo.com',
+            subject:  "🔑 Your VM SSH Credentials",
+            body:     """\
 Hello,
 
 Your EC2 instance is up and running. Follow these steps:
@@ -130,11 +167,15 @@ Your EC2 instance is up and running. Follow these steps:
    client-access-key.pem
 
 2) Secure the key:
-chmod 400 client-access-key.pem
+   ```
+   chmod 400 client-access-key.pem
+   ```
 
 3) Connect over SSH:
-ssh -i client-access-key.pem ubuntu@${ip}
-Type “yes” if prompted.
+   ```
+   ssh -i client-access-key.pem ubuntu@${ip}
+   ```
+   Type “yes” if prompted.
 
 ### Troubleshooting
 - Ensure the IP (${ip}) is correct and port 22 is open.
@@ -143,11 +184,9 @@ Type “yes” if prompted.
 Cheers,  
 The Apollo Dojo Samurai Team
 """,
-  attachmentsPattern: 'client-access-key.pem',
-  mimeType:           'text/plain'
-)
-
-          }
+            attachmentsPattern: 'client-access-key.pem',
+            mimeType:           'text/plain'
+          )
         }
       }
     }
@@ -155,7 +194,7 @@ The Apollo Dojo Samurai Team
 
   post {
     always {
-      sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem || true'
+      sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
     }
     success {
       echo "Pipeline completed successfully!"
@@ -165,4 +204,3 @@ The Apollo Dojo Samurai Team
     }
   }
 }
-
