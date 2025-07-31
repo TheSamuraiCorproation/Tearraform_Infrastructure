@@ -1,0 +1,13 @@
+- name: Install specified tools
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install tools
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ tools_to_install }}"
