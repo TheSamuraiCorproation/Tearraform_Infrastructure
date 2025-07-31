@@ -190,7 +190,7 @@ Your EC2 instance is up and running. Follow these steps:
 Troubleshooting
 
 - Ensure the IP (${ip}) is correct and port 22 is open.
-- Verify key permissions with \`ls -l client-access-key.pem\`.
+- Verify key permissions with `ls -l client-access-key.pem`.
 
 Cheers,
 
