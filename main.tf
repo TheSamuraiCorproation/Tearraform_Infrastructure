@@ -17,5 +17,5 @@ module "ec2" {
 }
 
 output "ec2_public_ips" {
-  value = module.ec2_instances.public_ips
+  value = module.ec2.public_ips
 }
