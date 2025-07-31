@@ -3,7 +3,7 @@ pipeline {
 
   parameters {
     string(name: 'BUCKET', defaultValue: 'thesamuraibucket', description: 'S3 bucket name')
-    string(name: 'KEY', defaultValue: '', description: 'S3 object key (leave blank for auto-generated timestamp)')
+    string(name: 'KEY',    defaultValue: '', description: 'S3 object key (leave blank for auto-generated timestamp)')
   }
 
   environment {
@@ -101,9 +101,9 @@ pipeline {
             // Get instance key (assuming one instance)
             def instance_key = payload.instances.keySet()[0]
 
-            // Get public IP
+            // Get public IP from ec2_public_ips output
             def ip = sh(
-              script: "terraform output -json public_ips | jq -r '.\"${instance_key}\"'",
+              script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
               returnStdout: true
             ).trim()
             if (!ip) error("No IP found for instance ${instance_key}")
@@ -155,10 +155,12 @@ pipeline {
           def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
 
           // Use existing payload.json from workspace (downloaded earlier)
-          def payload = readJSON file: 'payload.json'
+          def payload     = readJSON file: 'payload.json'
           def instance_key = payload.instances.keySet()[0]
+
+          // Get public IP from ec2_public_ips output
           def ip = sh(
-            script: "terraform output -json public_ips | jq -r '.\"${instance_key}\"'",
+            script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
             returnStdout: true
           ).trim()
           def clientEmail = payload.client_email
@@ -176,17 +178,19 @@ Hello,
 Your EC2 instance is up and running. Follow these steps:
 
 1. Download the private key (attached):
-client-access-key.pem
+   client-access-key.pem
+
 2. Secure the key:
-chmod 400 client-access-key.pem
+   chmod 400 client-access-key.pem
+
 3. Connect over SSH:
-ssh -i client-access-key.pem ubuntu@${ip}
-Type “yes” if prompted.
+   ssh -i client-access-key.pem ubuntu@${ip}
+   Type “yes” if prompted.
 
 Troubleshooting
 
-Ensure the IP (${ip}) is correct and port 22 is open.
-Verify key permissions with ls -l client-access-key.pem.
+- Ensure the IP (${ip}) is correct and port 22 is open.
+- Verify key permissions with \`ls -l client-access-key.pem\`.
 
 Cheers,
 
