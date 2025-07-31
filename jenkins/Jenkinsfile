@@ -118,10 +118,10 @@ pipeline {
 
             // 4) Send via Email-Extension with attachment
             emailext(
-              to:       clientEmail,
-              replyTo:  'no-reply@apollo-dojo.com',
-              subject:  "🔑 Your VM SSH Credentials",
-              body:     """\
+  to:       clientEmail,
+  replyTo:  'no-reply@apollo-dojo.com',
+  subject:  "🔑 Your VM SSH Credentials",
+  body:     """\
 Hello,
 
 Your EC2 instance is up and running. Follow these steps:
@@ -138,14 +138,15 @@ Type “yes” if prompted.
 
 ### Troubleshooting
 - Ensure the IP (${ip}) is correct and port 22 is open.
-- Verify key permissions with \`ls -l client-access-key.pem\`.
+- Verify key permissions with `ls -l client-access-key.pem`.
 
 Cheers,  
 The Apollo Dojo Samurai Team
 """,
-              attachmentsPattern: 'client-access-key.pem',
-              mimeType:           'text/plain'
-            )
+  attachmentsPattern: 'client-access-key.pem',
+  mimeType:           'text/plain'
+)
+
           }
         }
       }
