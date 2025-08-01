@@ -20,18 +20,20 @@ resource "aws_instance" "this" {
     chmod 700 /home/ubuntu/.ssh
 
     # Ensure authorized_keys file exists and has correct permissions
-    touch /home/ubuntu/.ssh/authorized_keys
+    # AWS injects the public key from key_name into authorized_keys
+    if [ ! -f /home/ubuntu/.ssh/authorized_keys ]; then
+      touch /home/ubuntu/.ssh/authorized_keys
+    fi
     chmod 600 /home/ubuntu/.ssh/authorized_keys
 
-    # The public key from key_name is injected by AWS into authorized_keys
     # Set ownership
     chown ubuntu:ubuntu /home/ubuntu/.ssh -R
 
     # Start and enable SSH service
     systemctl enable ssh --now
 
-    # Wait briefly to ensure SSH is ready
-    sleep 30
+    # Wait longer to ensure SSH is fully ready
+    sleep 120
   EOF
   )
 }
