@@ -1,50 +1,20 @@
 pipeline {
   agent any
-
   parameters {
     string(name: 'BUCKET', defaultValue: 'thesamuraibucket', description: 'S3 bucket name')
     string(name: 'KEY', defaultValue: '', description: 'S3 object key (leave blank for auto-generated timestamp)')
   }
-
   environment {
     AWS_DEFAULT_REGION = 'eu-central-1'
-    JENKINS_URL        = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
-    TIMESTAMP          = "${new Date().format('yyyyMMdd_HHmmss')}" // e.g., 20250801_1200
+    JENKINS_URL = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
+    TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
   }
-
   stages {
     stage('Checkout') {
       steps {
         git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
       }
     }
-
-    stage('Ensure Key Pair') {
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-terraform-creds',
-          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-          sh '''
-            if ! aws ec2 describe-key-pairs --key-names client-access-key --region eu-central-1 >/dev/null 2>&1; then
-              aws ec2 create-key-pair --key-name client-access-key \
-                --region eu-central-1 --query 'KeyMaterial' --output text \
-                > /tmp/client-access-key.pem
-              chmod 400 /tmp/client-access-key.pem
-              sudo cp /tmp/client-access-key.pem /var/lib/jenkins/client-access-key.pem
-              sudo chmod 400 /var/lib/jenkins/client-access-key.pem
-            else
-              echo "Key pair client-access-key already exists"
-            fi
-            cp /var/lib/jenkins/client-access-key.pem client-access-key.pem
-            chmod 400 client-access-key.pem
-          '''
-        }
-      }
-    }
-
     stage('Terraform Init') {
       steps {
         withCredentials([[
@@ -57,7 +27,6 @@ pipeline {
         }
       }
     }
-
     stage('Terraform Apply') {
       steps {
         withCredentials([[
@@ -74,12 +43,13 @@ pipeline {
                 -var 's3_payload_key=${s3Key}' \
                 -var 'jenkins_url=${JENKINS_URL}' \
                 -auto-approve
+              terraform output -raw private_key_pem > client-access-key.pem
+              chmod 400 client-access-key.pem
             """
           }
         }
       }
     }
-
     stage('Install Tools with Ansible') {
       steps {
         withCredentials([[
@@ -90,30 +60,16 @@ pipeline {
         ]]) {
           script {
             def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
-
-            // Download JSON from S3
             sh "aws s3 cp s3://${BUCKET}/${s3Key} payload.json"
-
-            // Read JSON
             def payload = readJSON file: 'payload.json'
-
-            // Get instance key (assuming one instance)
             def instance_key = payload.instances.keySet()[0]
-
-            // Get public IP from ec2_public_ips output
             def ip = sh(
               script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
               returnStdout: true
             ).trim()
             if (!ip) error("No IP found for instance ${instance_key}")
-
-            // Get tools list
             def toolsList = payload.instances[instance_key].tools_to_install
-
-            // Create inventory file
             writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
-
-            // Wait for SSH with timeout
             timeout(time: 10, unit: 'MINUTES') {
               sh """
                 until ssh -i client-access-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${ip} 'echo SSH is up'; do
@@ -122,8 +78,6 @@ pipeline {
                 done
               """
             }
-
-            // Run Ansible
             ansiblePlaybook(
               playbook: 'ansible/install_tools.yml',
               inventory: 'inventory.ini',
@@ -135,7 +89,6 @@ pipeline {
         }
       }
     }
-
     stage('Archive Outputs') {
       steps {
         withCredentials([[
@@ -149,62 +102,45 @@ pipeline {
         }
       }
     }
-
     stage('Send SSH Details') {
       steps {
         script {
           def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
-
-          // Use existing payload.json from workspace (downloaded earlier)
-          def payload     = readJSON file: 'payload.json'
+          def payload = readJSON file: 'payload.json'
           def instance_key = payload.instances.keySet()[0]
-
-          // Get public IP from ec2_public_ips output
           def ip = sh(
             script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
             returnStdout: true
           ).trim()
           def clientEmail = payload.client_email
-
-          // Archive the key
           archiveArtifacts artifacts: 'client-access-key.pem'
-
-          // Send email
           emailext(
-            to:       clientEmail,
-            replyTo:  'no-reply@apollo-dojo.com',
-            subject:  "🔑 Your VM SSH Credentials",
-            body:     """\
+            to: clientEmail,
+            replyTo: 'no-reply@apollo-dojo.com',
+            subject: "🔑 Your VM SSH Credentials",
+            body: """\
 Hello,
 Your EC2 instance is up and running. Follow these steps:
-
 1. Download the private key (attached):
    client-access-key.pem
-
 2. Secure the key:
    chmod 400 client-access-key.pem
-
 3. Connect over SSH:
    ssh -i client-access-key.pem ubuntu@${ip}
    Type “yes” if prompted.
-
 Troubleshooting
-
 - Ensure the IP (${ip}) is correct and port 22 is open.
 - Verify key permissions with `ls -l client-access-key.pem`.
-
 Cheers,
-
 The Apollo Dojo Samurai Team
 """,
             attachmentsPattern: 'client-access-key.pem',
-            mimeType:           'text/plain'
+            mimeType: 'text/plain'
           )
         }
       }
     }
   }
-
   post {
     always {
       sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
