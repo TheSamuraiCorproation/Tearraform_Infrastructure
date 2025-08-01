@@ -51,44 +51,46 @@ pipeline {
       }
     }
     stage('Install Tools with Ansible') {
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-terraform-creds',
-          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-          script {
-            def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
-            sh "aws s3 cp s3://${BUCKET}/${s3Key} payload.json"
-            def payload = readJSON file: 'payload.json'
-            def instance_key = payload.instances.keySet()[0]
-            def ip = sh(
-              script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
-              returnStdout: true
-            ).trim()
-            if (!ip) error("No IP found for instance ${instance_key}")
-            def toolsList = payload.instances[instance_key].tools_to_install
-            writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
-            timeout(time: 10, unit: 'MINUTES') {
-              sh """
-                until ssh -i client-access-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${ip} 'echo SSH is up'; do
-                  echo "Waiting for SSH..."
-                  sleep 15
-                done
-              """
-            }
-            ansiblePlaybook(
-              playbook: 'ansible/install_tools.yml',
-              inventory: 'inventory.ini',
-              extraVars: [
-                tools_to_install: toolsList
-              ]
-            )
+  steps {
+    withCredentials([[
+      $class: 'AmazonWebServicesCredentialsBinding',
+      credentialsId: 'aws-terraform-creds',
+      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+    ]]) {
+      script {
+        def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
+        sh "aws s3 cp s3://${BUCKET}/${s3Key} payload.json"
+        def payload = readJSON file: 'payload.json'
+        def instance_key = payload.instances.keySet()[0]
+        def ip = sh(
+          script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
+          returnStdout: true
+        ).trim()
+        if (!ip) error("No IP found for instance ${instance_key}")
+        def toolsList = payload.instances[instance_key].tools_to_install ?: []  // Default to empty list if undefined
+        writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
+        timeout(time: 20, unit: 'MINUTES') {
+          retry(3) {
+            sh """
+              until ssh -i client-access-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${ip} 'echo SSH is up'; do
+                echo "Waiting for SSH..."
+                sleep 30
+              done
+            """
           }
         }
+        ansiblePlaybook(
+          playbook: 'ansible/install_tools.yml',
+          inventory: 'inventory.ini',
+          extraVars: [
+            tools_to_install: toolsList  // Pass the list directly without join
+          ]
+        )
       }
     }
+  }
+}
     stage('Archive Outputs') {
       steps {
         withCredentials([[
