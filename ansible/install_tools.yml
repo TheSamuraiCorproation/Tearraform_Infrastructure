@@ -1,17 +1,15 @@
 - name: Install specified tools
   hosts: all
   become: yes
-  vars:
-    tools_to_install: "{{ tools_to_install | default([]) }}"  # Default to empty list if undefined
   tasks:
     - name: Update apt cache
       apt:
         update_cache: yes
-      when: tools_to_install | length > 0  # Only update cache if there are tools to install
+      when: tools_to_install is defined and tools_to_install | length > 0  # Check if defined and non-empty
 
     - name: Install tools
       apt:
         name: "{{ item }}"
         state: present
-      loop: "{{ tools_to_install }}"
-      when: tools_to_install | length > 0  # Only install if there are tools
+      loop: "{{ tools_to_install | default([]) }}"  # Use default filter directly in the loop
+      when: tools_to_install is defined and tools_to_install | length > 0  # Only run if tools are specified
