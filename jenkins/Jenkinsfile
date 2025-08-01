@@ -3,17 +3,16 @@ pipeline {
 
   parameters {
     string(name: 'BUCKET', defaultValue: 'thesamuraibucket', description: 'S3 bucket name')
-    string(name: 'KEY',    defaultValue: '', description: 'S3 object key (leave blank for auto-generated timestamp)')
+    string(name: 'KEY', defaultValue: '', description: 'S3 object key (leave blank for auto-generated timestamp)')
   }
 
   environment {
     AWS_DEFAULT_REGION = 'eu-central-1'
     JENKINS_URL        = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
-    TIMESTAMP          = "${new Date().format('yyyyMMdd_HHmmss')}" // e.g., 20250731_155800
+    TIMESTAMP          = "${new Date().format('yyyyMMdd_HHmmss')}" // e.g., 20250801_1200
   }
 
   stages {
-
     stage('Checkout') {
       steps {
         git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
@@ -114,13 +113,15 @@ pipeline {
             // Create inventory file
             writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
 
-            // Wait for SSH
-            sh """
-              until ssh -i client-access-key.pem -o StrictHostKeyChecking=no ubuntu@${ip} 'echo SSH is up'; do
-                echo "Waiting for SSH..."
-                sleep 10
-              done
-            """
+            // Wait for SSH with timeout
+            timeout(time: 10, unit: 'MINUTES') {
+              sh """
+                until ssh -i client-access-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${ip} 'echo SSH is up'; do
+                  echo "Waiting for SSH..."
+                  sleep 15
+                done
+              """
+            }
 
             // Run Ansible
             ansiblePlaybook(
@@ -216,4 +217,3 @@ The Apollo Dojo Samurai Team
     }
   }
 }
-
