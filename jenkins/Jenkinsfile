@@ -151,6 +151,7 @@ The Apollo Dojo Samurai Team
     }
   }
 }
+}
   post {
     always {
       sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
