@@ -37,7 +37,7 @@ resource "aws_eks_node_group" "node_group" {
 }
 
 resource "aws_iam_role" "eks_cluster_role" {
-  name = "${var.cluster_name}-cluster-role"
+  name               = "${var.cluster_name}-cluster-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -46,10 +46,11 @@ resource "aws_iam_role" "eks_cluster_role" {
       Principal = { Service = "eks.amazonaws.com" }
     }]
   })
+  force_detach_policies = true
 }
 
 resource "aws_iam_role" "eks_node_role" {
-  name = "${var.cluster_name}-node-role"
+  name               = "${var.cluster_name}-node-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -58,6 +59,7 @@ resource "aws_iam_role" "eks_node_role" {
       Principal = { Service = "ec2.amazonaws.com" }
     }]
   })
+  force_detach_policies = true
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
