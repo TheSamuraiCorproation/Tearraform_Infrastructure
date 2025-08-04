@@ -105,22 +105,31 @@ pipeline {
       }
     }
     stage('Send SSH Details') {
-      steps {
-        script {
-          def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
-          def payload = readJSON file: 'payload.json'
-          def instance_key = payload.instances.keySet()[0]
-          def ip = sh(
-            script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
-            returnStdout: true
-          ).trim()
-          def clientEmail = payload.client_email
-          archiveArtifacts artifacts: 'client-access-key.pem'
-          emailext(
-            to: clientEmail,
-            replyTo: 'no-reply@apollo-dojo.com',
-            subject: "🔑 Your VM SSH Credentials",
-            body: """\
+  steps {
+    script {
+      def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
+      def payload = readJSON file: 'payload.json'
+      def instance_key = payload.instances.keySet()[0]
+      def ip
+      withCredentials([[
+        $class: 'AmazonWebServicesCredentialsBinding',
+        credentialsId: 'aws-terraform-creds',
+        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+      ]]) {
+        ip = sh(
+          script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
+          returnStdout: true
+        ).trim()
+      }
+      if (!ip) error("No IP found for instance ${instance_key}")
+      def clientEmail = payload.client_email
+      archiveArtifacts artifacts: 'client-access-key.pem'
+      emailext(
+        to: clientEmail,
+        replyTo: 'no-reply@apollo-dojo.com',
+        subject: "🔑 Your VM SSH Credentials",
+        body: """\
 Hello,
 Your EC2 instance is up and running. Follow these steps:
 1. Download the private key (attached):
@@ -136,13 +145,12 @@ Troubleshooting
 Cheers,
 The Apollo Dojo Samurai Team
 """,
-            attachmentsPattern: 'client-access-key.pem',
-            mimeType: 'text/plain'
-          )
-        }
-      }
+        attachmentsPattern: 'client-access-key.pem',
+        mimeType: 'text/plain'
+      )
     }
   }
+}
   post {
     always {
       sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
