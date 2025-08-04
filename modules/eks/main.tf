@@ -13,7 +13,9 @@ resource "aws_eks_cluster" "cluster" {
   version  = var.kubernetes_version
 
   vpc_config {
-    subnet_ids = var.subnet_ids
+    subnet_ids              = var.subnet_ids
+    endpoint_private_access = false  # Set to true for private subnets with NAT
+    endpoint_public_access  = true   # Set to false for private subnets
   }
 
   depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
