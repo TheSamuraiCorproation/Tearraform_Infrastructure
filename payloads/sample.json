@@ -1,43 +1,34 @@
 {
+  "user_name": "Mohamed Hedi Nasri",
+  "client_email": "mnasri@thesamurai.com",
+  "service_type": "eks",  // or "eks" to switch scenarios
   "instances": {
-    "opendlp-vm": {
-      "name": "opendlp-vm",
+    "mohamed-hedi-nasri-vm": {
+      "name": "mohamed-hedi-nasri-vm",
       "ami": "ami-0cebfb1f908092578",
       "instance_type": "t3.xlarge",
-      "user_data": "#!/bin/bash\napt update -y && apt install -y opendlp && /usr/bin/opendlp-configure",
-      "security_groups": ["opendlp_sg", "dlp_monitoring_sg"],
+      "security_groups": ["sg-07153bb61638c94bf"],
       "key_name": "client-access-key",
+      "tools_to_install": ["htop", "vim"],
       "tags": {
-        "OS": "mac",
-        "Tool": "OpenDLP"
-      },
-      "compliance_requirements": ["FERPA", "COPPA"]
+        "Environment": "Development",
+        "Owner": "Mohamed Hedi Nasri"
+      }
+    }
+  },
+  "eks": {
+    "cluster_name": "my-eks-cluster",
+    "kubernetes_version": "1.29",
+    "node_group": {
+      "instance_type": "t3.medium",
+      "desired_capacity": 2,
+      "max_size": 3,
+      "min_size": 1
     },
-    "wazuh-vm": {
-      "name": "wazuh-vm",
-      "ami": "ami-0cebfb1f908092578",
-      "instance_type": "t3.xlarge",
-      "user_data": "#!/bin/bash\napt update -y && apt install -y wazuh && /usr/bin/wazuh-configure",
-      "security_groups": ["wazuh_siem_sg", "endpoint_comm_sg"],
-      "key_name": "client-access-key",
-      "tags": {
-        "OS": "mac",
-        "Tool": "Wazuh"
-      },
-      "compliance_requirements": ["FERPA", "COPPA"]
-    },
-    "security-onion-vm": {
-      "name": "security-onion-vm",
-      "ami": "ami-0cebfb1f908092578",
-      "instance_type": "t3.xlarge",
-      "user_data": "#!/bin/bash\napt update -y && apt install -y security-onion && /usr/bin/security-onion-configure",
-      "security_groups": ["security_onion_sg", "network_monitoring_sg"],
-      "key_name": "client-access-key",
-      "tags": {
-        "OS": "mac",
-        "Tool": "Security Onion"
-      },
-      "compliance_requirements": ["FERPA", "COPPA"]
+    "subnet_ids": ["subnet-0c58b996aad07a170", "subnet-044990a3c6441fbe0", "subnet-0988f4f0d595fe16d", "subnet-05a6ed5c6fe9e38d4", "subnet-04069d2231aa7c333", "subnet-0088e54045744e01e"],
+    "tags": {
+      "Environment": "Production",
+      "Project": "EKS-Cluster"
     }
   }
 }
