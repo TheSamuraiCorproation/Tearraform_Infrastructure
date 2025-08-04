@@ -1,7 +1,7 @@
 {
   "user_name": "Mohamed Hedi Nasri",
   "client_email": "mnasri@thesamurai.com",
-  "service_type": "eks",  // or "eks" to switch scenarios
+  "service_type": "eks", 
   "instances": {
     "mohamed-hedi-nasri-vm": {
       "name": "mohamed-hedi-nasri-vm",
