@@ -38,8 +38,8 @@ module "ec2" {
 
 # Conditionally deploy EKS module
 module "eks" {
-  source    = "./modules/eks"
-  count     = local.payload.service_type == "eks" ? 1 : 0
+  source            = "./modules/eks"
+  count             = local.payload.service_type == "eks" ? 1 : 0
   cluster_name      = local.payload.eks.cluster_name
   kubernetes_version = local.payload.eks.kubernetes_version
   subnet_ids        = local.payload.eks.subnet_ids
