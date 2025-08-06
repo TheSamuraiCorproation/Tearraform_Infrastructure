@@ -27,6 +27,7 @@ data "aws_s3_object" "payload" {
 
 locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
+  unique_cluster_name = "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}"
 }
 
 # Conditionally deploy EC2 module
@@ -40,7 +41,7 @@ module "ec2" {
 module "eks" {
   source            = "./modules/eks"
   count             = local.payload.service_type == "eks" ? 1 : 0
-  cluster_name      = local.payload.eks.cluster_name
+  cluster_name      = local.unique_cluster_name
   kubernetes_version = local.payload.eks.kubernetes_version
   subnet_ids        = local.payload.eks.subnet_ids
   node_group        = local.payload.eks.node_group
