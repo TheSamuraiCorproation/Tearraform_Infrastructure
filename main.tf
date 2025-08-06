@@ -42,7 +42,7 @@ module "eks" {
   count     = local.payload.service_type == "eks" ? 1 : 0
   cluster_name      = local.payload.eks.cluster_name
   kubernetes_version = local.payload.eks.kubernetes_version
-  subnet_ids        = ["subnet-0c58b996aad07a170", "subnet-044990a3c6441fbe0", "subnet-0988f4f0d595fe16d", "subnet-05a6ed5c6fe9e38d4", "subnet-04069d2231aa7c333", "subnet-0088e54045744e01e"]
+  subnet_ids        = local.payload.eks.subnet_ids
   node_group        = local.payload.eks.node_group
   providers = {
     aws = aws
