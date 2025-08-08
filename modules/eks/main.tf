@@ -11,7 +11,7 @@ terraform {
 resource "aws_security_group" "eks_cluster" {
   name        = "${var.cluster_name}-sg"
   description = "Security group for EKS cluster ${var.cluster_name}"
-  vpc_id      = "vpc-0a565dfb582b4fc92" # Match your VPC
+  vpc_id      = "vpc-00830dfe1c96492ce" # Updated VPC ID
 
   egress {
     from_port   = 0
@@ -29,7 +29,7 @@ resource "aws_security_group" "eks_cluster" {
 resource "aws_security_group" "eks_nodes" {
   name        = "${var.cluster_name}-nodes-sg"
   description = "Security group for EKS nodes ${var.cluster_name}"
-  vpc_id      = "vpc-0a565dfb582b4fc92" # Match your VPC
+  vpc_id      = "vpc-00830dfe1c96492ce" # Updated VPC ID
 
   ingress {
     from_port   = 0
