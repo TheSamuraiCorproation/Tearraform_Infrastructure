@@ -39,15 +39,12 @@ module "ec2" {
 
 # Conditionally deploy EKS module
 module "eks" {
-  source            = "./modules/eks"
-  count             = local.payload.service_type == "eks" ? 1 : 0
-  cluster_name      = local.unique_cluster_name
+  source = "./modules/eks"
+
+  cluster_name       = local.payload.eks.cluster_name
   kubernetes_version = local.payload.eks.kubernetes_version
-  subnet_ids        = local.payload.eks.subnet_ids
-  node_group        = local.payload.eks.node_group
-  providers = {
-    aws = aws
-  }
+  subnet_ids         = local.payload.eks.subnet_ids
+  node_group         = local.payload.eks.node_group
 }
 
 # Output EC2 public IPs (only relevant for EC2 scenario)
