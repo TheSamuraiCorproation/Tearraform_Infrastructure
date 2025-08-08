@@ -7,12 +7,15 @@ terraform {
   }
 }
 
+provider "aws" {
+  region = "eu-central-1"
+}
 
 # Create a security group for the EKS cluster
 resource "aws_security_group" "eks_cluster" {
   name        = "${var.cluster_name}-sg"
   description = "Security group for EKS cluster ${var.cluster_name}"
-  vpc_id      = "vpc-04bad41e8eaa1437d" # Use your new VPC
+  vpc_id      = "vpc-04bad41e8eaa1437d"
 
   egress {
     from_port   = 0
@@ -30,11 +33,11 @@ resource "aws_security_group" "eks_cluster" {
 resource "aws_security_group" "eks_nodes" {
   name        = "${var.cluster_name}-nodes-sg"
   description = "Security group for EKS nodes ${var.cluster_name}"
-  vpc_id      = "vpc-04bad41e8eaa1437d" # Use your new VPC
+  vpc_id      = "vpc-04bad41e8eaa1437d"
 
   ingress {
     from_port   = 0
-    to_port     = 65535
+    to_port     = 0
     protocol    = "-1"
     self        = true
   }
@@ -86,7 +89,7 @@ resource "aws_security_group_rule" "node_to_control_plane_443" {
 resource "aws_security_group_rule" "node_to_node" {
   type                     = "ingress"
   from_port                = 0
-  to_port                  = 65535
+  to_port                  = 0
   protocol                 = "-1"
   security_group_id        = aws_security_group.eks_nodes.id
   source_security_group_id = aws_security_group.eks_nodes.id
@@ -153,6 +156,11 @@ resource "aws_eks_cluster" "cluster" {
     endpoint_private_access = false
     endpoint_public_access  = true
     security_group_ids      = [aws_security_group.eks_cluster.id]
+  }
+
+  # Force recreation if VPC or subnets change
+  lifecycle {
+    create_before_destroy = true
   }
 
   depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
