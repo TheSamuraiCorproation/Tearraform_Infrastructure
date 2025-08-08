@@ -28,44 +28,42 @@ pipeline {
       }
     }
     stage('Terraform Apply') {
-  steps {
-    withCredentials([[
-      $class: 'AmazonWebServicesCredentialsBinding',
-      credentialsId: 'aws-terraform-creds',
-      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-    ]]) {
-      script {
-        def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
-        sh "aws s3 cp s3://${BUCKET}/${s3Key} payload.json"
-        def payload = readJSON file: 'payload.json'
-        def serviceType = payload.service_type
-        if (serviceType == 'ec2') {
-          sh """
-            terraform apply \
-              -var 's3_payload_bucket=${BUCKET}' \
-              -var 's3_payload_key=${s3Key}' \
-              -var 'jenkins_url=${JENKINS_URL}' \
-              -auto-approve
-            terraform output -raw private_key_pem > client-access-key.pem
-            chmod 400 client-access-key.pem
-          """
-        } else if (serviceType == 'eks') {
-          sh """
-            terraform apply \
-              -var 's3_payload_bucket=${BUCKET}' \
-              -var 's3_payload_key=${s3Key}' \
-              -auto-approve
-          """
-          // Validate EKS node group security group
-          sh 'aws eks describe-nodegroup --cluster-name $(terraform output -raw cluster_name) --nodegroup-name managed-node-group --region eu-central-1 --query "nodegroup.subnets[0].securityGroups" --output text | grep sg-08bb32aa5dd0cb5a0 || echo "Security group mismatch, check configuration"'
-        } else {
-          error("Invalid service_type: ${serviceType}")
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          script {
+            def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
+            sh "aws s3 cp s3://${BUCKET}/${s3Key} payload.json"
+            def payload = readJSON file: 'payload.json'
+            def serviceType = payload.service_type
+            if (serviceType == 'ec2') {
+              sh """
+                terraform apply \
+                  -var 's3_payload_bucket=${BUCKET}' \
+                  -var 's3_payload_key=${s3Key}' \
+                  -var 'jenkins_url=${JENKINS_URL}' \
+                  -auto-approve
+                terraform output -raw private_key_pem > client-access-key.pem
+                chmod 400 client-access-key.pem
+              """
+            } else if (serviceType == 'eks') {
+              sh """
+                terraform apply \
+                  -var 's3_payload_bucket=${BUCKET}' \
+                  -var 's3_payload_key=${s3Key}' \
+                  -auto-approve
+              """
+            } else {
+              error("Invalid service_type: ${serviceType}")
+            }
+          }
         }
       }
     }
-  }
-}
     stage('Install Tools with Ansible') {
       when {
         expression { readJSON(file: 'payload.json').service_type == 'ec2' }
@@ -138,37 +136,40 @@ pipeline {
             replyTo: 'no-reply@apollo-dojo.com',
             subject: "🔑 Your VM SSH Credentials",
             body: """\
-Hello,
+	Hello,
 Your EC2 instance is up and running. Follow these steps:
-1. Download the private key (attached):
-   client-access-key.pem
-2. Secure the key:
-   chmod 400 client-access-key.pem
-3. Connect over SSH:
-   ssh -i client-access-key.pem ubuntu@${ip}
-   Type “yes” if prompted.
+
+Download the private key (attached):
+client-access-key.pem
+Secure the key:
+chmod 400 client-access-key.pem
+Connect over SSH:
+ssh -i client-access-key.pem ubuntu@${ip}
+Type “yes” if prompted.
 Troubleshooting
-- Ensure the IP (${ip}) is correct and port 22 is open.
-- Verify key permissions with `ls -l client-access-key.pem`.
+
+
+Ensure the IP (${ip}) is correct and port 22 is open.
+Verify key permissions with ls -l client-access-key.pem.
 Cheers,
 The Apollo Dojo Samurai Team
 """,
-            attachmentsPattern: 'client-access-key.pem',
-            mimeType: 'text/plain'
-          )
-        }
-      }
-    }
-  }
-  post {
-    always {
-      sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
-    }
-    success {
-      echo "Pipeline completed successfully!"
-    }
-    failure {
-      echo "Pipeline failed. Check logs for details."
-    }
-  }
+attachmentsPattern: 'client-access-key.pem',
+mimeType: 'text/plain'
+)
+}
+}
+}
+}
+post {
+always {
+sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
+}
+success {
+echo "Pipeline completed successfully!"
+}
+failure {
+echo "Pipeline failed. Check logs for details."
+}
+}
 }

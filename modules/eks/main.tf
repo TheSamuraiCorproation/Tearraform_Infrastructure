@@ -7,35 +7,98 @@ terraform {
   }
 }
 
-resource "aws_eks_cluster" "cluster" {
-  name     = var.cluster_name
-  role_arn = aws_iam_role.eks_cluster_role.arn
-  version  = var.kubernetes_version
+# Create a security group for the EKS cluster
+resource "aws_security_group" "eks_cluster" {
+  name        = "${var.cluster_name}-sg"
+  description = "Security group for EKS cluster ${var.cluster_name}"
+  vpc_id      = "vpc-0a565dfb582b4fc92" # Match your VPC
 
-  vpc_config {
-    subnet_ids              = var.subnet_ids
-    endpoint_private_access = false
-    endpoint_public_access  = true
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
+  tags = {
+    Name = "${var.cluster_name}-sg"
+  }
 }
 
-resource "aws_eks_node_group" "node_group" {
-  cluster_name    = aws_eks_cluster.cluster.name
-  node_group_name = "managed-node-group"
-  node_role_arn   = aws_iam_role.eks_node_role.arn
-  subnet_ids      = var.subnet_ids
+# Create a security group for the node group
+resource "aws_security_group" "eks_nodes" {
+  name        = "${var.cluster_name}-nodes-sg"
+  description = "Security group for EKS nodes ${var.cluster_name}"
+  vpc_id      = "vpc-0a565dfb582b4fc92" # Match your VPC
 
-  scaling_config {
-    desired_size = var.node_group.desired_capacity
-    max_size     = var.node_group.max_size
-    min_size     = var.node_group.min_size
+  ingress {
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "-1"
+    self        = true
   }
 
-  instance_types = [var.node_group.instance_type]
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-  depends_on = [aws_iam_role_policy_attachment.eks_worker_policy, aws_iam_role_policy_attachment.eks_cni_policy]
+  tags = {
+    Name = "${var.cluster_name}-nodes-sg"
+  }
+}
+
+# Allow node-to-control-plane communication
+resource "aws_security_group_rule" "node_to_control_plane_1025" {
+  type                     = "ingress"
+  from_port                = 1025
+  to_port                  = 1025
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.eks_nodes.id
+  source_security_group_id = aws_security_group.eks_cluster.id
+  depends_on               = [aws_eks_cluster.cluster]
+}
+
+resource "aws_security_group_rule" "node_to_control_plane_30000_32767" {
+  type                     = "ingress"
+  from_port                = 30000
+  to_port                  = 32767
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.eks_nodes.id
+  source_security_group_id = aws_security_group.eks_cluster.id
+  depends_on               = [aws_eks_cluster.cluster]
+}
+
+resource "aws_security_group_rule" "node_to_control_plane_443" {
+  type                     = "ingress"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.eks_nodes.id
+  source_security_group_id = aws_security_group.eks_cluster.id
+  depends_on               = [aws_eks_cluster.cluster]
+}
+
+# Allow node-to-node communication
+resource "aws_security_group_rule" "node_to_node" {
+  type                     = "ingress"
+  from_port                = 0
+  to_port                  = 65535
+  protocol                 = "-1"
+  security_group_id        = aws_security_group.eks_nodes.id
+  source_security_group_id = aws_security_group.eks_nodes.id
+}
+
+# Ensure outbound rule allows all traffic
+resource "aws_security_group_rule" "outbound_all" {
+  type              = "egress"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  security_group_id = aws_security_group.eks_nodes.id
+  cidr_blocks       = ["0.0.0.0/0"]
 }
 
 resource "aws_iam_role" "eks_cluster_role" {
@@ -79,59 +142,46 @@ resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
 }
 
-# Data source to get the EKS cluster details
-data "aws_eks_cluster" "cluster" {
-  name = aws_eks_cluster.cluster.name
+resource "aws_eks_cluster" "cluster" {
+  name     = var.cluster_name
+  role_arn = aws_iam_role.eks_cluster_role.arn
+  version  = var.kubernetes_version
+
+  vpc_config {
+    subnet_ids              = var.subnet_ids
+    endpoint_private_access = false
+    endpoint_public_access  = true
+    security_group_ids      = [aws_security_group.eks_cluster.id]
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
 }
 
-# Security group rule for node-to-control-plane communication (port 1025)
-resource "aws_security_group_rule" "node_to_control_plane_1025" {
-  type              = "ingress"
-  from_port         = 1025
-  to_port           = 1025
-  protocol          = "tcp"
-  security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  source_security_group_id = tolist(data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids)[0]
-}
+resource "aws_eks_node_group" "node_group" {
+  cluster_name    = aws_eks_cluster.cluster.name
+  node_group_name = "managed-node-group"
+  node_role_arn   = aws_iam_role.eks_node_role.arn
+  subnet_ids      = var.subnet_ids
+  version         = var.kubernetes_version
 
-# Security group rule for node-to-control-plane communication (ports 30000-32767)
-resource "aws_security_group_rule" "node_to_control_plane_30000_32767" {
-  type              = "ingress"
-  from_port         = 30000
-  to_port           = 32767
-  protocol          = "tcp"
-  security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  source_security_group_id = tolist(data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids)[0]
-}
+  scaling_config {
+    desired_size = var.node_group.desired_capacity
+    max_size     = var.node_group.max_size
+    min_size     = var.node_group.min_size
+  }
 
-# Security group rule for node-to-control-plane communication (port 443)
-resource "aws_security_group_rule" "node_to_control_plane_443" {
-  type              = "ingress"
-  from_port         = 443
-  to_port           = 443
-  protocol          = "tcp"
-  security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  source_security_group_id = tolist(data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids)[0]
-}
+  instance_types = [var.node_group.instance_type]
 
-# Security group rule for node-to-node communication
-resource "aws_security_group_rule" "node_to_node" {
-  type              = "ingress"
-  from_port         = 0
-  to_port           = 65535
-  protocol          = "-1"
-  security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  source_security_group_id = "sg-08bb32aa5dd0cb5a0"
-}
+  # Associate the node security group
+  vpc_security_group_ids = [aws_security_group.eks_nodes.id]
 
-# Ensure outbound rule allows all traffic
-resource "aws_security_group_rule" "outbound_all" {
-  type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  cidr_blocks       = ["0.0.0.0/0"]
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_worker_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_security_group_rule.node_to_control_plane_1025,
+    aws_security_group_rule.node_to_control_plane_30000_32767,
+    aws_security_group_rule.node_to_control_plane_443
+  ]
 }
 
 output "cluster_endpoint" {
