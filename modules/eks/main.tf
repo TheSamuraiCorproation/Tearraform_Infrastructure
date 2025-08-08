@@ -91,7 +91,7 @@ resource "aws_security_group_rule" "node_to_control_plane_1025" {
   to_port           = 1025
   protocol          = "tcp"
   security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  source_security_group_id = data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids[0]
+  source_security_group_id = tolist(data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids)[0]
 }
 
 # Security group rule for node-to-control-plane communication (ports 30000-32767)
@@ -101,7 +101,7 @@ resource "aws_security_group_rule" "node_to_control_plane_30000_32767" {
   to_port           = 32767
   protocol          = "tcp"
   security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  source_security_group_id = data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids[0]
+  source_security_group_id = tolist(data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids)[0]
 }
 
 # Security group rule for node-to-control-plane communication (port 443)
@@ -111,7 +111,7 @@ resource "aws_security_group_rule" "node_to_control_plane_443" {
   to_port           = 443
   protocol          = "tcp"
   security_group_id = "sg-08bb32aa5dd0cb5a0" # Update with your SG ID
-  source_security_group_id = data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids[0]
+  source_security_group_id = tolist(data.aws_eks_cluster.cluster.vpc_config[0].security_group_ids)[0]
 }
 
 # Security group rule for node-to-node communication
