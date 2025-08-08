@@ -172,9 +172,6 @@ resource "aws_eks_node_group" "node_group" {
 
   instance_types = [var.node_group.instance_type]
 
-  # Associate the node security group
-  vpc_security_group_ids = [aws_security_group.eks_nodes.id]
-
   depends_on = [
     aws_iam_role_policy_attachment.eks_worker_policy,
     aws_iam_role_policy_attachment.eks_cni_policy,
