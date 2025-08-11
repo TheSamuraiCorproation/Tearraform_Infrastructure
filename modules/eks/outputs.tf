@@ -1,12 +1,16 @@
-output "cluster_name" {
+output "eks_cluster_name" {
   value = aws_eks_cluster.cluster.name
 }
 
-output "cluster_endpoint" {
+output "eks_cluster_endpoint" {
   value = aws_eks_cluster.cluster.endpoint
 }
 
-output "cluster_certificate_authority_data" {
+output "eks_cluster_certificate_authority" {
   value = aws_eks_cluster.cluster.certificate_authority[0].data
+}
+
+output "eks_fargate_profile_name" {
+  value = aws_eks_fargate_profile.default.fargate_profile_name
 }
 
