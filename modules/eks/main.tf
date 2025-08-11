@@ -26,7 +26,7 @@ data "aws_subnet" "selected" {
 
 # Security group for EKS
 resource "aws_security_group" "eks_cluster" {
-  name        = "${var.cluster_name}-sg"
+  name_prefix = "${var.cluster_name}-sg-"
   description = "Security group for EKS cluster"
   vpc_id      = data.aws_subnet.selected.vpc_id
 
@@ -45,6 +45,7 @@ resource "aws_security_group" "eks_cluster" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
 
 # Create the EKS Cluster (no EC2 nodes)
 resource "aws_eks_cluster" "cluster" {
