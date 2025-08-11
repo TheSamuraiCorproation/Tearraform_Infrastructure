@@ -34,12 +34,10 @@ variable "use_fargate" {
 }
 
 variable "fargate_selectors" {
-  description = <<EOT
-List of selector maps for Fargate profile. Each item should include "namespace" (string)
+  description = "List of selector maps for Fargate profile. Each item should include "namespace" (string)
 and optionally "labels" (map of string). Example:
-[{ "namespace": "default" }, { "namespace": "my-app", "labels": {"app":"web"} }]
-EOT
-  type    = list(any)
-  default = []
+[{ "namespace": "default" }, { "namespace": "my-app", "labels": {"app":"web"} }] "
+  type        = list(map(string))
+  default     = []
 }
 
