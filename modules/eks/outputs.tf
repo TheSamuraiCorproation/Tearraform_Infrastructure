@@ -14,3 +14,7 @@ output "fargate_profile_name" {
   value = aws_eks_fargate_profile.fargate_profile.fargate_profile_name
 }
 
+output "cluster_name" {
+  value = module.eks.cluster_name
+}
+
