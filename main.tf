@@ -41,13 +41,21 @@ module "ec2" {
 module "eks" {
   source = "./modules/eks"
 
+  # use unique name 
   cluster_name       = local.unique_cluster_name
-  kubernetes_version = local.payload.eks.kubernetes_version
-  subnet_ids         = local.payload.eks.subnet_ids
-  node_group         = local.payload.eks.node_group
-  use_fargate        = lookup(local.payload.eks, "use_fargate", false)
-  fargate_selectors  = lookup(local.payload.eks, "fargate_selectors", [])
+  kubernetes_version = try(local.payload.eks.kubernetes_version, "1.27")
+  subnet_ids         = try(local.payload.eks.subnet_ids, [])
+  vpc_id             = try(local.payload.eks.vpc_id, "")
+
+  # Force Fargate for all EKS deployments. Ignore payload.node_group.
+  use_fargate       = true
+  # Accept selectors from payload if present, otherwise default to `default` namespace
+  fargate_selectors = try(local.payload.eks.fargate_selectors, [{ "namespace" = "default" }])
+
+  # keep node_group param present (module expects it) but we'll not use it when use_fargate = true
+  node_group = try(local.payload.eks.node_group, {})
 }
+
 
 
 # Output EC2 public IPs (only relevant for EC2 scenario)

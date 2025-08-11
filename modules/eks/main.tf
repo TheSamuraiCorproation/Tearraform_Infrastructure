@@ -7,7 +7,19 @@ terraform {
   }
 }
 
-# NOTE: Provider config should come from root module. Do NOT hardcode region here.
+# IMPORTANT: provider config should come from root module
+
+####################
+# Normalize fargate_selectors
+# Accepts list of strings or list of maps and produces list of maps { namespace = "...", labels = {...} }
+####################
+locals {
+  fargate_selectors_normalized = [
+    for s in var.fargate_selectors : (
+      can(s["namespace"]) ? merge({"namespace" = s["namespace"]}, { "labels" = lookup(s, "labels", {}) }) : {"namespace" = tostring(s), "labels" = {}}
+    )
+  ]
+}
 
 ####################
 # Security groups
@@ -209,9 +221,9 @@ resource "aws_eks_fargate_profile" "fargate" {
   depends_on             = [aws_eks_cluster.cluster]
 
   dynamic "selector" {
-    for_each = var.fargate_selectors
+    for_each = local.fargate_selectors_normalized
     content {
-      namespace = lookup(selector.value, "namespace", null)
+      namespace = selector.value.namespace
       labels    = lookup(selector.value, "labels", {})
     }
   }
@@ -257,8 +269,11 @@ output "cluster_endpoint" {
   value = aws_eks_cluster.cluster.endpoint
 }
 
-# Helpful: kubeconfig certificate authority data (base64)
 output "cluster_certificate_authority_data" {
   value = aws_eks_cluster.cluster.certificate_authority[0].data
+}
+
+output "fargate_profile_arns" {
+  value = var.use_fargate ? [for p in aws_eks_fargate_profile.fargate : p.arn] : []
 }
 
