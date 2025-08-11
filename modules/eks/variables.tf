@@ -14,3 +14,16 @@ variable "kubernetes_version" {
   default     = "1.29"
 }
 
+variable "fargate_selectors" {
+  description = "List of Fargate selectors with optional labels"
+  type = list(object({
+    namespace = string
+    labels    = optional(map(string))
+  }))
+  default = [
+    {
+      namespace = "default"
+    }
+  ]
+}
+

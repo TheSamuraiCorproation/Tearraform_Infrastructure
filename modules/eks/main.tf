@@ -91,8 +91,19 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
   pod_execution_role_arn = aws_iam_role.fargate_pod_execution_role.arn
   subnet_ids             = var.subnet_ids
 
-  selector {
-    namespace = "default"
+  dynamic "selector" {
+    for_each = var.fargate_selectors
+    content {
+      namespace = selector.value.namespace
+
+      dynamic "labels" {
+        for_each = lookup(selector.value, "labels", {}) != null ? [lookup(selector.value, "labels", {})] : []
+        content {
+          for key, value in labels.value :
+          key = value
+        }
+      }
+    }
   }
 
   depends_on = [
@@ -100,4 +111,6 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
     aws_iam_role_policy_attachment.fargate_pod_execution_policy
   ]
 }
+
+
 

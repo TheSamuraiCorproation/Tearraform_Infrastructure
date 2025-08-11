@@ -2,7 +2,7 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Generate an RSA private key for EC2 key pair
+# Generate RSA private key for EC2 key pair
 resource "tls_private_key" "ec2_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -27,7 +27,6 @@ data "aws_s3_object" "payload" {
 locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
 
-  # Create a unique cluster name by combining client/user and requested cluster name
   unique_cluster_name = "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}"
 }
 
@@ -41,9 +40,15 @@ module "ec2" {
 # Conditionally deploy EKS if service_type == "eks"
 module "eks" {
   source             = "./modules/eks"
-  cluster_name       = local.unique_cluster_name
+  count              = local.payload.service_type == "eks" ? 1 : 0
+  cluster_name       = local.payload.eks.cluster_name
   kubernetes_version = local.payload.eks.kubernetes_version
   subnet_ids         = local.payload.eks.subnet_ids
+  fargate_selectors  = lookup(local.payload.eks, "fargate_selectors", [
+    {
+      namespace = "default"
+    }
+  ])
 }
 
 output "ec2_public_ips" {
@@ -51,6 +56,6 @@ output "ec2_public_ips" {
 }
 
 output "eks_cluster_endpoint" {
-  value = local.payload.service_type == "eks" ? module.eks.cluster_endpoint : null
+  value = local.payload.service_type == "eks" ? module.eks[0].cluster_endpoint : null
 }
 
