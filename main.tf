@@ -39,22 +39,12 @@ module "ec2" {
 
 # Conditionally deploy EKS module
 module "eks" {
-  source = "./modules/eks"
-
-  # use unique name 
-  cluster_name       = local.unique_cluster_name
-  kubernetes_version = try(local.payload.eks.kubernetes_version, "1.27")
-  subnet_ids         = try(local.payload.eks.subnet_ids, [])
-  vpc_id             = try(local.payload.eks.vpc_id, "")
-
-  # Force Fargate for all EKS deployments. Ignore payload.node_group.
-  use_fargate       = true
-  # Accept selectors from payload if present, otherwise default to `default` namespace
-  fargate_selectors = try(local.payload.eks.fargate_selectors, [{ "namespace" = "default" }])
-
-  # keep node_group param present (module expects it) but we'll not use it when use_fargate = true
-  node_group = try(local.payload.eks.node_group, {})
+  source             = "./modules/eks"
+  cluster_name       = var.eks["cluster_name"]
+  kubernetes_version = var.eks["kubernetes_version"]
+  subnet_ids         = var.eks["subnet_ids"]
 }
+
 
 
 
