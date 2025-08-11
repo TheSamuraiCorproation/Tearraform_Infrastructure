@@ -1,11 +1,3 @@
-variable "cluster_name" {}
-variable "subnet_ids" {
-  type = list(string)
-}
-variable "kubernetes_version" {
-  default = "1.29"
-}
-
 # IAM Role for EKS Cluster
 resource "aws_iam_role" "eks_cluster_role" {
   name = "${var.cluster_name}-eks-cluster-role"
@@ -28,6 +20,10 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
+data "aws_subnet" "selected" {
+  id = var.subnet_ids[0]
+}
+
 # Security group for EKS
 resource "aws_security_group" "eks_cluster" {
   name        = "${var.cluster_name}-sg"
@@ -48,10 +44,6 @@ resource "aws_security_group" "eks_cluster" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-}
-
-data "aws_subnet" "selected" {
-  id = var.subnet_ids[0]
 }
 
 # Create the EKS Cluster (no EC2 nodes)
