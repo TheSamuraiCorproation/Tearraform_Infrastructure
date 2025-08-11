@@ -60,5 +60,5 @@ output "ec2_public_ips" {
 
 # Output EKS cluster endpoint (only relevant for EKS scenario)
 output "eks_cluster_endpoint" {
-  value = local.payload.service_type == "eks" ? module.eks[0].cluster_endpoint : null
+  value = local.payload.service_type == "eks" ? module.eks.cluster_endpoint : null
 }
