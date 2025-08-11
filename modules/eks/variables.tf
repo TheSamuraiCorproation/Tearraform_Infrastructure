@@ -12,13 +12,13 @@ variable "kubernetes_version" {
 variable "vpc_id" {
   description = "VPC id where EKS will be created"
   type        = string
-
+  default     = ""
 }
 
 variable "subnet_ids" {
   description = "List of subnet ids for EKS"
   type        = list(string)
-
+  default     = []
 }
 
 variable "node_group" {
@@ -34,10 +34,14 @@ variable "use_fargate" {
 }
 
 variable "fargate_selectors" {
-  description = "List of selector maps for Fargate profile. Each item should include "namespace" (string)
-and optionally "labels" (map of string). Example:
-[{ "namespace": "default" }, { "namespace": "my-app", "labels": {"app":"web"} }] "
-  type        = list(map(string))
-  default     = []
+  description = <<EOT
+List of selectors for the Fargate profile. Accepts either:
+- a list of objects, e.g. [{ "namespace" = "default", "labels" = {"app" = "web"} }]
+- a list of strings, e.g. ["default", "my-app"]
+
+The module normalizes strings into objects { namespace = "<value>", labels = {} }.
+EOT
+  type    = list(any)
+  default = []
 }
 
