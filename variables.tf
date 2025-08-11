@@ -19,3 +19,4 @@ variable "jenkins_url" {
   type        = string
   default     = "https://9216d38c2a3f.ngrok-free.app"
 }
+
