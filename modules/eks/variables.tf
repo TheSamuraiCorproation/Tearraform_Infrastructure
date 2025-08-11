@@ -21,25 +21,18 @@ variable "subnet_ids" {
   default     = []
 }
 
-variable "node_group" {
-  description = "Node group configuration map (instance_type, desired_capacity, min_size, max_size)"
-  type        = any
-  default     = {}
-}
-
 variable "use_fargate" {
-  description = "Whether to deploy pods on Fargate (true) or with a managed node group (false)"
+  description = "Whether to deploy pods on Fargate (true) or not"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "fargate_selectors" {
   description = <<EOT
-List of selectors for the Fargate profile. Accepts either:
-- a list of objects, e.g. [{ "namespace" = "default", "labels" = {"app" = "web"} }]
-- a list of strings, e.g. ["default", "my-app"]
-
-The module normalizes strings into objects { namespace = "<value>", labels = {} }.
+List of selectors for the Fargate profile. Accepts:
+- list of strings: ["default", "my-app"]
+- list of maps/objects: [{ namespace = "default" }, { namespace = "my-app", labels = { app = "web" } }]
+If empty, module will default to [{ namespace = "default" }].
 EOT
   type    = list(any)
   default = []
