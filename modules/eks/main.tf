@@ -7,15 +7,15 @@ terraform {
   }
 }
 
-provider "aws" {
-  region = "eu-central-1"
-}
+# NOTE: Provider config should come from root module. Do NOT hardcode region here.
 
-# Create a security group for the EKS cluster
+####################
+# Security groups
+####################
 resource "aws_security_group" "eks_cluster" {
   name        = "${var.cluster_name}-sg"
   description = "Security group for EKS cluster ${var.cluster_name}"
-  vpc_id      = "vpc-04bad41e8eaa1437d"
+  vpc_id      = var.vpc_id
 
   egress {
     from_port   = 0
@@ -29,11 +29,10 @@ resource "aws_security_group" "eks_cluster" {
   }
 }
 
-# Create a security group for the node group
 resource "aws_security_group" "eks_nodes" {
   name        = "${var.cluster_name}-nodes-sg"
   description = "Security group for EKS nodes ${var.cluster_name}"
-  vpc_id      = "vpc-04bad41e8eaa1437d"
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port   = 0
@@ -54,7 +53,79 @@ resource "aws_security_group" "eks_nodes" {
   }
 }
 
-# Allow node-to-control-plane communication
+####################
+# IAM Roles (cluster & node)
+####################
+resource "aws_iam_role" "eks_cluster_role" {
+  name = "${var.cluster_name}-cluster-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "eks.amazonaws.com" }
+    }]
+  })
+
+  force_detach_policies = true
+}
+
+resource "aws_iam_role" "eks_node_role" {
+  name = "${var.cluster_name}-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+
+  force_detach_policies = true
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_policy" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+}
+
+####################
+# EKS Cluster
+####################
+resource "aws_eks_cluster" "cluster" {
+  name     = var.cluster_name
+  role_arn = aws_iam_role.eks_cluster_role.arn
+  version  = var.kubernetes_version
+
+  vpc_config {
+    subnet_ids              = var.subnet_ids
+    endpoint_private_access = false
+    endpoint_public_access  = true
+    security_group_ids      = [aws_security_group.eks_cluster.id]
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
+}
+
+####################
+# Security group rules referencing cluster (create after cluster)
+####################
 resource "aws_security_group_rule" "node_to_control_plane_1025" {
   type                     = "ingress"
   from_port                = 1025
@@ -85,7 +156,6 @@ resource "aws_security_group_rule" "node_to_control_plane_443" {
   depends_on               = [aws_eks_cluster.cluster]
 }
 
-# Allow node-to-node communication
 resource "aws_security_group_rule" "node_to_node" {
   type                     = "ingress"
   from_port                = 0
@@ -95,7 +165,6 @@ resource "aws_security_group_rule" "node_to_node" {
   source_security_group_id = aws_security_group.eks_nodes.id
 }
 
-# Ensure outbound rule allows all traffic
 resource "aws_security_group_rule" "outbound_all" {
   type              = "egress"
   from_port         = 0
@@ -105,68 +174,55 @@ resource "aws_security_group_rule" "outbound_all" {
   cidr_blocks       = ["0.0.0.0/0"]
 }
 
-resource "aws_iam_role" "eks_cluster_role" {
-  name               = "${var.cluster_name}-cluster-role"
+####################
+# Fargate: Pod Execution Role and Profile (created only if use_fargate = true)
+####################
+resource "aws_iam_role" "fargate_pod_execution_role" {
+  count = var.use_fargate ? 1 : 0
+
+  name = "${var.cluster_name}-fargate-pod-exec-role"
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = ["sts:AssumeRole", "sts:TagSession"]
       Effect = "Allow"
-      Principal = { Service = "eks.amazonaws.com" }
+      Principal = {
+        Service = "eks-fargate-pods.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
     }]
   })
-  force_detach_policies = true
 }
 
-resource "aws_iam_role" "eks_node_role" {
-  name               = "${var.cluster_name}-node-role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = ["sts:AssumeRole", "sts:TagSession"]
-      Effect = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-    }]
-  })
-  force_detach_policies = true
+resource "aws_iam_role_policy_attachment" "fargate_pod_exec_policy" {
+  count      = var.use_fargate ? 1 : 0
+  role       = aws_iam_role.fargate_pod_execution_role[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy"
 }
 
-resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
-  role       = aws_iam_role.eks_cluster_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-}
+resource "aws_eks_fargate_profile" "fargate" {
+  count                  = var.use_fargate ? 1 : 0
+  cluster_name           = aws_eks_cluster.cluster.name
+  fargate_profile_name   = "${var.cluster_name}-fp"
+  pod_execution_role_arn = aws_iam_role.fargate_pod_execution_role[0].arn
+  subnet_ids             = var.subnet_ids
+  depends_on             = [aws_eks_cluster.cluster]
 
-resource "aws_iam_role_policy_attachment" "eks_worker_policy" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-}
-
-resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
-}
-
-resource "aws_eks_cluster" "cluster" {
-  name     = var.cluster_name
-  role_arn = aws_iam_role.eks_cluster_role.arn
-  version  = var.kubernetes_version
-
-  vpc_config {
-    subnet_ids              = var.subnet_ids
-    endpoint_private_access = false
-    endpoint_public_access  = true
-    security_group_ids      = [aws_security_group.eks_cluster.id]
+  dynamic "selector" {
+    for_each = var.fargate_selectors
+    content {
+      namespace = lookup(selector.value, "namespace", null)
+      labels    = lookup(selector.value, "labels", {})
+    }
   }
-
-  # Force recreation if VPC or subnets change
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
 }
 
+####################
+# Managed node group (created only if use_fargate = false)
+####################
 resource "aws_eks_node_group" "node_group" {
+  count = var.use_fargate ? 0 : 1
+
   cluster_name    = aws_eks_cluster.cluster.name
   node_group_name = "managed-node-group"
   node_role_arn   = aws_iam_role.eks_node_role.arn
@@ -174,12 +230,12 @@ resource "aws_eks_node_group" "node_group" {
   version         = var.kubernetes_version
 
   scaling_config {
-    desired_size = var.node_group.desired_capacity
-    max_size     = var.node_group.max_size
-    min_size     = var.node_group.min_size
+    desired_size = lookup(var.node_group, "desired_capacity", 1)
+    max_size     = lookup(var.node_group, "max_size", 2)
+    min_size     = lookup(var.node_group, "min_size", 1)
   }
 
-  instance_types = [var.node_group.instance_type]
+  instance_types = [lookup(var.node_group, "instance_type", "t3.medium")]
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_worker_policy,
@@ -190,6 +246,19 @@ resource "aws_eks_node_group" "node_group" {
   ]
 }
 
+####################
+# Outputs
+####################
+output "cluster_name" {
+  value = aws_eks_cluster.cluster.name
+}
+
 output "cluster_endpoint" {
   value = aws_eks_cluster.cluster.endpoint
 }
+
+# Helpful: kubeconfig certificate authority data (base64)
+output "cluster_certificate_authority_data" {
+  value = aws_eks_cluster.cluster.certificate_authority[0].data
+}
+

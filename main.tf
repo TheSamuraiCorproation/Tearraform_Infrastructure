@@ -42,10 +42,16 @@ module "eks" {
   source = "./modules/eks"
 
   cluster_name       = local.payload.eks.cluster_name
-  kubernetes_version = local.payload.eks.kubernetes_version
+  kubernetes_version = lookup(local.payload.eks, "kubernetes_version", "1.27")
   subnet_ids         = local.payload.eks.subnet_ids
-  node_group         = local.payload.eks.node_group
+  vpc_id             = lookup(local.payload.eks, "vpc_id", "")
+
+  node_group = lookup(local.payload.eks, "node_group", {})
+
+  use_fargate       = lookup(local.payload.eks, "use_fargate", false)
+  fargate_selectors = lookup(local.payload.eks, "fargate_selectors", [])
 }
+
 
 # Output EC2 public IPs (only relevant for EC2 scenario)
 output "ec2_public_ips" {
