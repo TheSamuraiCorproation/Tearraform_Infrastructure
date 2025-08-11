@@ -51,13 +51,23 @@ pipeline {
                 chmod 400 client-access-key.pem
               """
             } else if (serviceType == 'eks') {
-              sh """
-                terraform apply \
-                  -var 's3_payload_bucket=${BUCKET}' \
-                  -var 's3_payload_key=${s3Key}' \
-                  -auto-approve
-              """
-            } else {
+  sh """
+    terraform apply \
+      -var 's3_payload_bucket=${BUCKET}' \
+      -var 's3_payload_key=${s3Key}' \
+      -auto-approve
+  """
+  // fetch cluster name and setup kubeconfig (agent needs awscli + kubectl)
+  def clusterName = sh(script: "terraform output -raw cluster_name", returnStdout: true).trim()
+  echo "Cluster created: ${clusterName}"
+  sh """
+    aws eks update-kubeconfig --name ${clusterName} --region ${AWS_DEFAULT_REGION}
+    echo "kubectl cluster-info"
+    kubectl cluster-info || true
+    kubectl get nodes --all-namespaces || true
+  """
+}
+else {
               error("Invalid service_type: ${serviceType}")
             }
           }
