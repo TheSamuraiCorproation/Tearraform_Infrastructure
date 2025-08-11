@@ -95,14 +95,7 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
     for_each = var.fargate_selectors
     content {
       namespace = selector.value.namespace
-
-      dynamic "labels" {
-        for_each = lookup(selector.value, "labels", {}) != null ? [lookup(selector.value, "labels", {})] : []
-        content {
-          for key, value in labels.value :
-          key = value
-        }
-      }
+      labels    = lookup(selector.value, "labels", null)
     }
   }
 
