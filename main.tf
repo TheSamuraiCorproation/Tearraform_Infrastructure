@@ -62,7 +62,7 @@ output "eks_cluster_endpoint" {
 }
 
 # Outputs for EKS cluster name (only when EKS is deployed)
-output "eks_cluster_name" {
+output "cluster_name" {
   value = local.payload.service_type == "eks" ? module.eks[0].cluster_name : null
 }
 
