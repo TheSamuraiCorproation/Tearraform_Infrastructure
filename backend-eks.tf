@@ -1,9 +1,10 @@
 terraform {
   backend "s3" {
     bucket         = "thesamuraibucket"
-    key            = "terraform/state.tfstate"
+    key            = "terraform/eks/terraform.tfstate"
     region         = "eu-central-1"
-    dynamodb_table = "terraform-locks"
+    dynamodb_table = "terraform-locks-eks"
     encrypt        = true
   }
 }
+

@@ -28,7 +28,6 @@ pipeline {
             env.S3_PAYLOAD_KEY = params.KEY.trim()
           } else {
             echo "No S3 key provided, attempting to find latest payload JSON in bucket..."
-            // List all keys in bucket that match *_ai_output_*.json and pick the latest by last modified date
             def listJson = sh (
               script: "aws s3api list-objects-v2 --bucket ${params.BUCKET} --query 'Contents[?contains(Key, `_ai_output_`) && ends_with(Key, `.json`)] | sort_by(@, &LastModified)[-1].Key' --output text",
               returnStdout: true
@@ -42,18 +41,6 @@ pipeline {
         }
       }
     }
-    stage('Terraform Init') {
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-terraform-creds',
-          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-          sh 'terraform init -input=false -reconfigure'
-        }
-      }
-    }
     stage('Download Payload JSON') {
       steps {
         withCredentials([[
@@ -63,13 +50,39 @@ pipeline {
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
           sh "aws s3 cp s3://${params.BUCKET}/${env.S3_PAYLOAD_KEY} payload.json"
+        }
+      }
+    }
+    stage('Parse Payload for Service Type') {
+      steps {
+        script {
+          def payload = readJSON file: 'payload.json'
+          env.SERVICE_TYPE = payload.service_type
+          echo "Payload JSON loaded:"
+          echo "  User Name: ${payload.user_name}"
+          echo "  Service Type: ${env.SERVICE_TYPE}"
+          echo "  Instances: ${payload.instances.keySet()}"
+        }
+      }
+    }
+    stage('Terraform Init') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
           script {
-            def payload = readJSON file: 'payload.json'
-            echo "Payload JSON loaded:"
-            echo "  User Name: ${payload.user_name}"
-            echo "  Service Type: ${payload.service_type}"
-            echo "  Instances: ${payload.instances.keySet()}"
+            if (env.SERVICE_TYPE == 'ec2') {
+              sh 'cp backend-ec2.tf backend.tf'
+            } else if (env.SERVICE_TYPE == 'eks') {
+              sh 'cp backend-eks.tf backend.tf'
+            } else {
+              error("Unsupported service type: ${env.SERVICE_TYPE}")
+            }
           }
+          sh 'terraform init -input=false -reconfigure'
         }
       }
     }
@@ -83,9 +96,8 @@ pipeline {
         ]]) {
           script {
             def payload = readJSON file: 'payload.json'
-            def serviceType = payload.service_type
-            echo "Service Type detected: ${serviceType}"
-            if (serviceType == 'ec2') {
+            echo "Service Type detected: ${env.SERVICE_TYPE}"
+            if (env.SERVICE_TYPE == 'ec2') {
               sh """
                 terraform apply \
                   -var 's3_payload_bucket=${params.BUCKET}' \
@@ -95,7 +107,7 @@ pipeline {
                 terraform output -raw private_key_pem > client-access-key.pem
                 chmod 400 client-access-key.pem
               """
-            } else if (serviceType == 'eks') {
+            } else if (env.SERVICE_TYPE == 'eks') {
               sh """
                 terraform apply \
                   -var 's3_payload_bucket=${params.BUCKET}' \
@@ -111,7 +123,7 @@ pipeline {
                 kubectl get nodes --all-namespaces || true
               """
             } else {
-              error("Invalid or unsupported service_type: ${serviceType}")
+              error("Invalid or unsupported service_type: ${env.SERVICE_TYPE}")
             }
           }
         }
@@ -119,7 +131,7 @@ pipeline {
     }
     stage('Install Tools with Ansible') {
       when {
-        expression { readJSON(file: 'payload.json').service_type == 'ec2' }
+        expression { env.SERVICE_TYPE == 'ec2' }
       }
       steps {
         withCredentials([[
@@ -161,7 +173,7 @@ pipeline {
     }
     stage('Send SSH Details') {
       when {
-        expression { readJSON(file: 'payload.json').service_type == 'ec2' }
+        expression { env.SERVICE_TYPE == 'ec2' }
       }
       steps {
         script {
