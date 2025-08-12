@@ -27,8 +27,9 @@ data "aws_s3_object" "payload" {
 locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
 
-  unique_cluster_name = "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}"
+  unique_cluster_name = local.payload.service_type == "eks" ? "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}" : ""
 }
+
 
 # Conditionally deploy EC2 if service_type == "ec2"
 module "ec2" {
