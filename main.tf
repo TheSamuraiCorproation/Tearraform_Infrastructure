@@ -2,6 +2,11 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Generate a unique suffix for the key name
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
 # Generate RSA private key for EC2 key pair
 resource "tls_private_key" "ec2_key" {
   algorithm = "RSA"
@@ -9,8 +14,12 @@ resource "tls_private_key" "ec2_key" {
 }
 
 resource "aws_key_pair" "ec2_key_pair" {
-  key_name   = "client-access-key"
+  key_name   = "client-access-key-${random_id.unique_suffix.hex}"
   public_key = tls_private_key.ec2_key.public_key_openssh
+
+  lifecycle {
+    ignore_changes = [key_name] # Ignore changes to key_name to prevent recreation
+  }
 }
 
 output "private_key_pem" {
@@ -29,7 +38,6 @@ locals {
 
   unique_cluster_name = local.payload.service_type == "eks" ? "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}" : ""
 }
-
 
 # Conditionally deploy EC2 if service_type == "ec2"
 module "ec2" {
@@ -71,4 +79,3 @@ output "cluster_name" {
 output "eks_cluster_certificate_authority_data" {
   value = local.payload.service_type == "eks" ? module.eks[0].cluster_certificate_authority_data : null
 }
-
