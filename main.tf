@@ -51,11 +51,23 @@ module "eks" {
   ])
 }
 
+# Outputs for EC2 public IPs (only when EC2 is deployed)
 output "ec2_public_ips" {
   value = local.payload.service_type == "ec2" ? module.ec2[0].public_ips : null
 }
 
+# Outputs for EKS cluster endpoint (only when EKS is deployed)
 output "eks_cluster_endpoint" {
   value = local.payload.service_type == "eks" ? module.eks[0].cluster_endpoint : null
+}
+
+# Outputs for EKS cluster name (only when EKS is deployed)
+output "eks_cluster_name" {
+  value = local.payload.service_type == "eks" ? module.eks[0].cluster_name : null
+}
+
+# Outputs for EKS certificate authority data (only when EKS is deployed)
+output "eks_cluster_certificate_authority_data" {
+  value = local.payload.service_type == "eks" ? module.eks[0].cluster_certificate_authority_data : null
 }
 
