@@ -66,26 +66,34 @@ pipeline {
       }
     }
     stage('Terraform Init') {
-      steps {
-        withCredentials([[
-          $class: 'AmazonWebServicesCredentialsBinding',
-          credentialsId: 'aws-terraform-creds',
-          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-          script {
-            if (env.SERVICE_TYPE == 'ec2') {
-              sh 'cp backend-ec2.tf backend.tf'
-            } else if (env.SERVICE_TYPE == 'eks') {
-              sh 'cp backend-eks.tf backend.tf'
-            } else {
-              error("Unsupported service type: ${env.SERVICE_TYPE}")
-            }
-          }
-          sh 'terraform init -input=false -reconfigure'
+  steps {
+    withCredentials([
+      [$class: 'AmazonWebServicesCredentialsBinding',
+      credentialsId: 'aws-terraform-creds',
+      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']
+    ]) {
+      script {
+        def serviceType = readJSON(file: 'payload.json').service_type
+
+        if (serviceType == 'ec2') {
+          sh '''
+            cp backends/backend-ec2.tf backend.tf
+          '''
+        } else if (serviceType == 'eks') {
+          sh '''
+            cp backends/backend-eks.tf backend.tf
+          '''
+        } else {
+          error "Unsupported service type: ${serviceType}"
         }
+
+        sh 'terraform init -input=false -reconfigure'
       }
     }
+  }
+}
+
     stage('Terraform Apply') {
       steps {
         withCredentials([[
