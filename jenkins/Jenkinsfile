@@ -2,7 +2,7 @@ pipeline {
   agent any
   parameters {
     string(name: 'BUCKET', defaultValue: 'thesamuraibucket', description: 'S3 bucket name')
-    string(name: 'KEY', defaultValue: '', description: 'S3 object key (leave blank for auto-generated timestamp)')
+    string(name: 'KEY', defaultValue: '', description: 'Exact S3 object key (leave blank to auto-find latest)')
   }
   environment {
     AWS_DEFAULT_REGION = 'eu-central-1'
@@ -10,9 +10,36 @@ pipeline {
     TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
   }
   stages {
+    stage('Clean Workspace') {
+      steps {
+        cleanWs()
+      }
+    }
     stage('Checkout') {
       steps {
         git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
+      }
+    }
+    stage('Find Payload JSON Key') {
+      steps {
+        script {
+          if (params.KEY?.trim()) {
+            echo "Using provided S3 key: ${params.KEY}"
+            env.S3_PAYLOAD_KEY = params.KEY.trim()
+          } else {
+            echo "No S3 key provided, attempting to find latest payload JSON in bucket..."
+            // List all keys in bucket that match *_ai_output_*.json and pick the latest by last modified date
+            def listJson = sh (
+              script: "aws s3api list-objects-v2 --bucket ${params.BUCKET} --query 'Contents[?contains(Key, `_ai_output_`) && ends_with(Key, `.json`)] | sort_by(@, &LastModified)[-1].Key' --output text",
+              returnStdout: true
+            ).trim()
+            if (!listJson || listJson == 'None') {
+              error "No matching JSON payload files found in S3 bucket ${params.BUCKET}"
+            }
+            echo "Latest payload JSON key found: ${listJson}"
+            env.S3_PAYLOAD_KEY = listJson
+          }
+        }
       }
     }
     stage('Terraform Init') {
@@ -27,6 +54,25 @@ pipeline {
         }
       }
     }
+    stage('Download Payload JSON') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          sh "aws s3 cp s3://${params.BUCKET}/${env.S3_PAYLOAD_KEY} payload.json"
+          script {
+            def payload = readJSON file: 'payload.json'
+            echo "Payload JSON loaded:"
+            echo "  User Name: ${payload.user_name}"
+            echo "  Service Type: ${payload.service_type}"
+            echo "  Instances: ${payload.instances.keySet()}"
+          }
+        }
+      }
+    }
     stage('Terraform Apply') {
       steps {
         withCredentials([[
@@ -36,39 +82,36 @@ pipeline {
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
           script {
-            def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
-            sh "aws s3 cp s3://${BUCKET}/${s3Key} payload.json"
             def payload = readJSON file: 'payload.json'
             def serviceType = payload.service_type
+            echo "Service Type detected: ${serviceType}"
             if (serviceType == 'ec2') {
               sh """
                 terraform apply \
-                  -var 's3_payload_bucket=${BUCKET}' \
-                  -var 's3_payload_key=${s3Key}' \
+                  -var 's3_payload_bucket=${params.BUCKET}' \
+                  -var 's3_payload_key=${env.S3_PAYLOAD_KEY}' \
                   -var 'jenkins_url=${JENKINS_URL}' \
                   -auto-approve
                 terraform output -raw private_key_pem > client-access-key.pem
                 chmod 400 client-access-key.pem
               """
             } else if (serviceType == 'eks') {
-  sh """
-    terraform apply \
-      -var 's3_payload_bucket=${BUCKET}' \
-      -var 's3_payload_key=${s3Key}' \
-      -auto-approve
-  """
-  // fetch cluster name and setup kubeconfig (agent needs awscli + kubectl)
-  def clusterName = sh(script: "terraform output -raw cluster_name", returnStdout: true).trim()
-  echo "Cluster created: ${clusterName}"
-  sh """
-    aws eks update-kubeconfig --name ${clusterName} --region ${AWS_DEFAULT_REGION}
-    echo "kubectl cluster-info"
-    kubectl cluster-info || true
-    kubectl get nodes --all-namespaces || true
-  """
-}
-else {
-              error("Invalid service_type: ${serviceType}")
+              sh """
+                terraform apply \
+                  -var 's3_payload_bucket=${params.BUCKET}' \
+                  -var 's3_payload_key=${env.S3_PAYLOAD_KEY}' \
+                  -auto-approve
+              """
+              def clusterName = sh(script: "terraform output -raw cluster_name", returnStdout: true).trim()
+              echo "Cluster created: ${clusterName}"
+              sh """
+                aws eks update-kubeconfig --name ${clusterName} --region ${AWS_DEFAULT_REGION}
+                echo "kubectl cluster-info"
+                kubectl cluster-info || true
+                kubectl get nodes --all-namespaces || true
+              """
+            } else {
+              error("Invalid or unsupported service_type: ${serviceType}")
             }
           }
         }
@@ -86,9 +129,8 @@ else {
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
           script {
-            def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
             def payload = readJSON file: 'payload.json'
-            def instance_key = payload.instances.keySet()[0]
+            def instance_key = payload.instances.keySet().toArray()[0]
             def ip = sh(
               script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
               returnStdout: true
@@ -123,9 +165,8 @@ else {
       }
       steps {
         script {
-          def s3Key = params.KEY ?: "user123_ai_output_${TIMESTAMP}.json"
           def payload = readJSON file: 'payload.json'
-          def instance_key = payload.instances.keySet()[0]
+          def instance_key = payload.instances.keySet().toArray()[0]
           def ip
           withCredentials([[
             $class: 'AmazonWebServicesCredentialsBinding',
@@ -146,40 +187,44 @@ else {
             replyTo: 'no-reply@apollo-dojo.com',
             subject: "🔑 Your VM SSH Credentials",
             body: """\
-	Hello,
+Hello,
+
 Your EC2 instance is up and running. Follow these steps:
 
-Download the private key (attached):
+Download the private key (attached):  
 client-access-key.pem
-Secure the key:
+
+Secure the key:  
 chmod 400 client-access-key.pem
-Connect over SSH:
-ssh -i client-access-key.pem ubuntu@${ip}
+
+Connect over SSH:  
+ssh -i client-access-key.pem ubuntu@${ip}  
 Type “yes” if prompted.
-Troubleshooting
 
+Troubleshooting:  
+- Ensure the IP (${ip}) is correct and port 22 is open.  
+- Verify key permissions with ls -l client-access-key.pem.
 
-Ensure the IP (${ip}) is correct and port 22 is open.
-Verify key permissions with ls -l client-access-key.pem.
-Cheers,
+Cheers,  
 The Apollo Dojo Samurai Team
 """,
-attachmentsPattern: 'client-access-key.pem',
-mimeType: 'text/plain'
-)
+            attachmentsPattern: 'client-access-key.pem',
+            mimeType: 'text/plain'
+          )
+        }
+      }
+    }
+  }
+  post {
+    always {
+      sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
+    }
+    success {
+      echo "Pipeline completed successfully!"
+    }
+    failure {
+      echo "Pipeline failed. Check logs for details."
+    }
+  }
 }
-}
-}
-}
-post {
-always {
-sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
-}
-success {
-echo "Pipeline completed successfully!"
-}
-failure {
-echo "Pipeline failed. Check logs for details."
-}
-}
-}
+
