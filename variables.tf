@@ -20,7 +20,4 @@ variable "jenkins_url" {
   default     = "https://9216d38c2a3f.ngrok-free.app"
 }
 
-variable "subnet_id" {
-  description = "Subnet ID for the EC2 instances"
-  type        = string
-}
+
