@@ -41,10 +41,12 @@ locals {
 
 # Conditionally deploy EC2 if service_type == "ec2"
 module "ec2" {
-  source    = "./modules/ec2"
-  count     = local.payload.service_type == "ec2" ? 1 : 0
-  instances = local.payload.instances
-  key_name  = aws_key_pair.ec2_key_pair.key_name # Pass the dynamic key_name
+  source           = "./modules/ec2"
+  count            = local.payload.service_type == "ec2" ? 1 : 0
+  instances        = local.payload.instances
+  key_name         = aws_key_pair.ec2_key_pair.key_name
+  security_group_id = lookup(local.payload.instances["mohamed-hedi-nasri-vm"], "security_groups", ["sg-07153bb61638c94bf"])[0] # Default to existing SG if not in payload
+  subnet_id        = var.subnet_id # Assume subnet_id is passed as a variable
 }
 
 # Conditionally deploy EKS if service_type == "eks"
