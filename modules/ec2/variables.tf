@@ -12,3 +12,18 @@ variable "instances" {
     tools_to_install       = optional(list(string))
   }))
 }
+
+variable "security_group_id" {
+  description = "Security group ID for the instances"
+  type        = string
+}
+
+variable "subnet_id" {
+  description = "Subnet ID for the instances"
+  type        = string
+}
+
+variable "key_name" {
+  description = "Name of the SSH key pair"
+  type        = string
+}

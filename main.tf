@@ -44,6 +44,7 @@ module "ec2" {
   source    = "./modules/ec2"
   count     = local.payload.service_type == "ec2" ? 1 : 0
   instances = local.payload.instances
+  key_name  = aws_key_pair.ec2_key_pair.key_name # Pass the dynamic key_name
 }
 
 # Conditionally deploy EKS if service_type == "eks"
