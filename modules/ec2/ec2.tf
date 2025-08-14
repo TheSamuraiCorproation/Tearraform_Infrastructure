@@ -49,7 +49,3 @@ resource "aws_instance" "this" {
     ignore_changes = [user_data]
   }
 }
-
-output "public_ips" {
-  value = { for k, v in aws_instance.this : k => v.public_ip }
-}
