@@ -37,7 +37,9 @@ locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
 
   unique_cluster_name = local.payload.service_type == "eks" ? "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}" : ""
-  instance_config     = local.payload.instances["mohamed-hedi-nasri-vm"]
+  # Dynamically get the first instance key from the payload
+  instance_keys = keys(local.payload.instances)
+  instance_config = local.payload.service_type == "ec2" ? local.payload.instances[local.instance_keys[0]] : null
 }
 
 # Conditionally deploy EC2 if service_type == "ec2"
@@ -45,9 +47,9 @@ module "ec2" {
   source           = "./modules/ec2"
   count            = local.payload.service_type == "ec2" ? 1 : 0
   instances        = local.payload.instances
-  key_name         = aws_key_pair.ec2_key_pair.key_name  # Use dynamic key_name
-  security_group_id = local.instance_config.security_groups[0]
-  subnet_id        = local.instance_config.subnet_id     # Use subnet_id from JSON
+  key_name         = aws_key_pair.ec2_key_pair.key_name
+  security_group_id = local.instance_config != null ? local.instance_config.security_groups[0] : null
+  subnet_id        = local.instance_config != null ? local.instance_config.subnet_id : null
 }
 
 # Conditionally deploy EKS if service_type == "eks"
