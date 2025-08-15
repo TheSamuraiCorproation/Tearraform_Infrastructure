@@ -159,26 +159,25 @@ pipeline {
         expression { env.SERVICE_TYPE == 'ec2' }
       }
       steps {
-        script {
-          def payload = readJSON file: 'payload.json'
-          def instance_keys = payload.instances.keySet()
-          def instance_key = instance_keys.iterator().next()
-          def ip = sh(script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'", returnStdout: true).trim()
-          def privateKey = sh(script: "terraform output -raw private_key_pem", returnStdout: true).trim()
-          def sshDetails = [
-            ip: ip,
-            user: 'ubuntu',
-            privateKey: privateKey
-          ]
-          // Safely convert to JSON string without triggering toArray
-          def jsonDetails = groovy.json.JsonOutput.toJson(sshDetails)
-          sh "echo '${jsonDetails}' > ssh_details.json"
-          withCredentials([[
-            $class: 'AmazonWebServicesCredentialsBinding',
-            credentialsId: 'aws-terraform-creds',
-            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-          ]]) {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          script {
+            def payload = readJSON file: 'payload.json'
+            def instance_keys = payload.instances.keySet()
+            def instance_key = instance_keys.iterator().next()
+            def ip = sh(script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'", returnStdout: true).trim()
+            def privateKey = sh(script: "terraform output -raw private_key_pem", returnStdout: true).trim()
+            def sshDetails = [
+              ip: ip,
+              user: 'ubuntu',
+              privateKey: privateKey
+            ]
+            def jsonDetails = groovy.json.JsonOutput.toJson(sshDetails)
+            sh "echo '${jsonDetails}' > ssh_details.json"
             sh "aws s3 cp ssh_details.json s3://${params.BUCKET}/ssh_details_${env.TIMESTAMP}.json"
           }
         }
