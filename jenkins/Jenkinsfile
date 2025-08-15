@@ -10,7 +10,11 @@ pipeline {
     TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
   }
   stages {
-    
+    stage('Declarative: Checkout SCM') {
+      steps {
+        checkout scm
+      }
+    }
     stage('Checkout') {
       steps {
         git url: 'https://github.com/NasriMohamedHedi/terraform-infra.git', branch: 'main'
@@ -19,21 +23,8 @@ pipeline {
     stage('Find Payload JSON Key') {
       steps {
         script {
-          if (params.KEY?.trim()) {
-            echo "Using provided S3 key: ${params.KEY}"
-            env.S3_PAYLOAD_KEY = params.KEY.trim()
-          } else {
-            echo "No S3 key provided, attempting to find latest payload JSON in bucket..."
-            def listJson = sh (
-              script: "aws s3api list-objects-v2 --bucket ${params.BUCKET} --query 'Contents[?contains(Key, `_ai_output_`) && ends_with(Key, `.json`)] | sort_by(@, &LastModified)[-1].Key' --output text",
-              returnStdout: true
-            ).trim()
-            if (!listJson || listJson == 'None') {
-              error "No matching JSON payload files found in S3 bucket ${params.BUCKET}"
-            }
-            echo "Latest payload JSON key found: ${listJson}"
-            env.S3_PAYLOAD_KEY = listJson
-          }
+          env.S3_PAYLOAD_KEY = params.KEY ?: sh(script: "aws s3 ls s3://${params.BUCKET}/ | sort | tail -n 1 | awk '{print \$4}'", returnStdout: true).trim()
+          echo "Using provided S3 key: ${env.S3_PAYLOAD_KEY}"
         }
       }
     }
@@ -57,39 +48,26 @@ pipeline {
           echo "Payload JSON loaded:"
           echo "  User Name: ${payload.user_name}"
           echo "  Service Type: ${env.SERVICE_TYPE}"
-          echo "  Instances: ${payload.instances.keySet()}"
+          echo "  Instances: ${payload.instances.keySet() as List}"
         }
       }
     }
     stage('Terraform Init') {
-  steps {
-    withCredentials([
-      [$class: 'AmazonWebServicesCredentialsBinding',
-      credentialsId: 'aws-terraform-creds',
-      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']
-    ]) {
-      script {
-        def serviceType = readJSON(file: 'payload.json').service_type
-
-        if (serviceType == 'ec2') {
-          sh '''
-            cp backends/backend-ec2.tf backend.tf
-          '''
-        } else if (serviceType == 'eks') {
-          sh '''
-            cp backends/backend-eks.tf backend.tf
-          '''
-        } else {
-          error "Unsupported service type: ${serviceType}"
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          script {
+            def payload = readJSON file: 'payload.json'
+            sh "cp backends/backend-${env.SERVICE_TYPE}.tf backend.tf"
+            sh "terraform init -input=false -reconfigure"
+          }
         }
-
-        sh 'terraform init -input=false -reconfigure'
       }
     }
-  }
-}
-
     stage('Terraform Apply') {
       steps {
         withCredentials([[
@@ -134,49 +112,48 @@ pipeline {
       }
     }
     stage('Install Tools with Ansible') {
-  when {
-    expression { env.SERVICE_TYPE == 'ec2' }
-  }
-  steps {
-    withCredentials([[
-      $class: 'AmazonWebServicesCredentialsBinding',
-      credentialsId: 'aws-terraform-creds',
-      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-    ]]) {
-      script {
-        def payload = readJSON file: 'payload.json'
-        // Get the first instance key directly from keySet() without toArray()
-        def instance_keys = payload.instances.keySet()
-        def instance_key = instance_keys.iterator().next() // Safely get the first key
-        def ip = sh(
-          script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
-          returnStdout: true
-        ).trim()
-        if (!ip) error("No IP found for instance ${instance_key}")
-        def toolsList = payload.instances[instance_key].tools_to_install ?: []
-        writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
-        timeout(time: 20, unit: 'MINUTES') {
-          retry(3) {
-            sh """
-              until ssh -i client-access-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${ip} 'echo SSH is up'; do
-                echo "Waiting for SSH..."
-                sleep 30
-              done
-            """
+      when {
+        expression { env.SERVICE_TYPE == 'ec2' }
+      }
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-terraform-creds',
+          accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+          secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+          script {
+            def payload = readJSON file: 'payload.json'
+            def instance_keys = payload.instances.keySet()
+            def instance_key = instance_keys.iterator().next()
+            def ip = sh(
+              script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
+              returnStdout: true
+            ).trim()
+            if (!ip) error("No IP found for instance ${instance_key}")
+            def toolsList = payload.instances[instance_key].tools_to_install ?: []
+            writeFile file: 'inventory.ini', text: "${ip} ansible_user=ubuntu ansible_ssh_private_key_file=${WORKSPACE}/client-access-key.pem"
+            timeout(time: 20, unit: 'MINUTES') {
+              retry(5) {
+                sh """
+                  until ssh -i client-access-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${ip} 'echo SSH is up'; do
+                    echo "Waiting for SSH..."
+                    sleep 30
+                  done
+                """
+              }
+            }
+            ansiblePlaybook(
+              playbook: 'ansible/install_tools.yml',
+              inventory: 'inventory.ini',
+              extraVars: [
+                tools_to_install: toolsList
+              ]
+            )
           }
         }
-        ansiblePlaybook(
-          playbook: 'ansible/install_tools.yml',
-          inventory: 'inventory.ini',
-          extraVars: [
-            tools_to_install: toolsList
-          ]
-        )
       }
     }
-  }
-}
     stage('Send SSH Details') {
       when {
         expression { env.SERVICE_TYPE == 'ec2' }
@@ -184,58 +161,33 @@ pipeline {
       steps {
         script {
           def payload = readJSON file: 'payload.json'
-          def instance_key = payload.instances.keySet().toArray()[0]
-          def ip
+          def instance_keys = payload.instances.keySet()
+          def instance_key = instance_keys.iterator().next()
+          def ip = sh(script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'", returnStdout: true).trim()
+          def privateKey = sh(script: "terraform output -raw private_key_pem", returnStdout: true).trim()
+          def sshDetails = [
+            ip: ip,
+            user: 'ubuntu',
+            privateKey: privateKey
+          ]
+          // Safely convert to JSON string without triggering toArray
+          def jsonDetails = groovy.json.JsonOutput.toJson(sshDetails)
+          sh "echo '${jsonDetails}' > ssh_details.json"
           withCredentials([[
             $class: 'AmazonWebServicesCredentialsBinding',
             credentialsId: 'aws-terraform-creds',
             accessKeyVariable: 'AWS_ACCESS_KEY_ID',
             secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
           ]]) {
-            ip = sh(
-              script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_key}\"'",
-              returnStdout: true
-            ).trim()
+            sh "aws s3 cp ssh_details.json s3://${params.BUCKET}/ssh_details_${env.TIMESTAMP}.json"
           }
-          if (!ip) error("No IP found for instance ${instance_key}")
-          def clientEmail = payload.client_email
-          archiveArtifacts artifacts: 'client-access-key.pem'
-          emailext(
-            to: clientEmail,
-            replyTo: 'no-reply@apollo-dojo.com',
-            subject: "🔑 Your VM SSH Credentials",
-            body: """\
-Hello,
-
-Your EC2 instance is up and running. Follow these steps:
-
-Download the private key (attached):  
-client-access-key.pem
-
-Secure the key:  
-chmod 400 client-access-key.pem
-
-Connect over SSH:  
-ssh -i client-access-key.pem ubuntu@${ip}  
-Type “yes” if prompted.
-
-Troubleshooting:  
-- Ensure the IP (${ip}) is correct and port 22 is open.  
-- Verify key permissions with ls -l client-access-key.pem.
-
-Cheers,  
-The Apollo Dojo Samurai Team
-""",
-            attachmentsPattern: 'client-access-key.pem',
-            mimeType: 'text/plain'
-          )
         }
       }
     }
   }
   post {
     always {
-      sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini || true'
+      sh 'rm -f /tmp/client-access-key.pem outputs.json client-access-key.pem payload.json inventory.ini ssh_details.json || true'
     }
     success {
       echo "Pipeline completed successfully!"
@@ -245,4 +197,3 @@ The Apollo Dojo Samurai Team
     }
   }
 }
-
