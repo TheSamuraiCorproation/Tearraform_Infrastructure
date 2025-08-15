@@ -1,9 +1,9 @@
 resource "aws_instance" "this" {
   for_each = var.instances
 
-  ami           = "ami-0cebfb1f908092578" # Ubuntu 20.04 LTS in eu-central-1
+  ami           = each.value.ami
   instance_type = each.value.instance_type
-  key_name      = var.key_name             # Use the key_name passed from the root module
+  key_name      = var.key_name
   vpc_security_group_ids = [var.security_group_id]
   subnet_id     = var.subnet_id
 
@@ -11,9 +11,9 @@ resource "aws_instance" "this" {
 
   tags = merge(
     {
-      "Name"        = each.key
+      "Name"        = each.value.name
       "Environment" = "Development"
-      "Owner"       = each.value.owner
+      "Owner"       = each.value.tags["Owner"] # Access Owner from tags
     },
     each.value.tags
   )
