@@ -135,8 +135,8 @@ pipeline {
                     -auto-approve || exit 1
                   terraform output -raw private_key_pem > client-access-key.pem || exit 1
                   chmod 400 client-access-key.pem || exit 1
-                  archiveArtifacts artifacts: 'client-access-key.pem' || exit 1
                 """
+                archiveArtifacts artifacts: 'client-access-key.pem' // Moved outside sh block
               } else if (payload.service_type == 'eks') {
                 sh """
                   terraform apply \
