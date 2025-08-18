@@ -136,7 +136,7 @@ pipeline {
                   terraform output -raw private_key_pem > client-access-key.pem || exit 1
                   chmod 400 client-access-key.pem || exit 1
                 """
-                archiveArtifacts artifacts: 'client-access-key.pem' // Moved outside sh block
+                archiveArtifacts artifacts: 'client-access-key.pem' // Archived here
               } else if (payload.service_type == 'eks') {
                 sh """
                   terraform apply \
@@ -244,9 +244,10 @@ pipeline {
               if (!clientEmail) {
                 error "No client_email found in payload"
               }
-              // Verify and archive the key file
-              sh "test -f client-access-key.pem || echo 'Key file missing'"
-              archiveArtifacts artifacts: 'client-access-key.pem' || { error "Failed to archive client-access-key.pem" }
+              // Debug: Check file existence and content
+              sh "test -f client-access-key.pem || { echo 'Key file missing'; exit 1; }"
+              sh "ls -l client-access-key.pem"
+              // No need to re-archive; use existing artifact
               emailext(
                 to: clientEmail,
                 replyTo: 'no-reply@apollo-dojo.com',
