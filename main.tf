@@ -51,8 +51,6 @@ locals {
   unique_cluster_name = local.eks_config != null ? "${local.eks_config.cluster_name}-${replace(local.payload.user_name, " ", "-")}" : null
   subnet_ids         = local.eks_config != null ? local.eks_config.subnet_ids : []
   kubernetes_version = local.eks_config != null ? lookup(local.eks_config, "kubernetes_version", "1.29") : "1.29"
-  vpc_id             = local.eks_config != null ? local.eks_config.vpc_id : null
-  use_fargate        = local.eks_config != null ? local.eks_config.use_fargate : false
   fargate_selectors  = local.eks_config != null ? lookup(local.eks_config, "fargate_selectors", []) : []
   owner_name         = local.eks_config != null ? local.payload.user_name : null
 
@@ -60,8 +58,7 @@ locals {
   validate_eks = local.eks_config != null ? (
     length(local.subnet_ids) > 0 &&
     local.eks_config.cluster_name != null &&
-    owner_name != null &&
-    vpc_id != null
+    owner_name != null
   ) : true
 }
 
@@ -82,8 +79,6 @@ module "eks" {
   cluster_name       = local.unique_cluster_name
   kubernetes_version = local.kubernetes_version
   subnet_ids         = local.subnet_ids
-  vpc_id             = local.vpc_id
-  use_fargate        = local.use_fargate
   fargate_selectors  = local.fargate_selectors
   owner_name         = local.owner_name
 }

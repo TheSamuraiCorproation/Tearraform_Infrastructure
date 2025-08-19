@@ -44,7 +44,7 @@ resource "aws_security_group" "eks_cluster" {
   count       = var.cluster_name != null ? 1 : 0
   name_prefix = "${var.cluster_name}-sg-"
   description = "Security group for EKS cluster"
-  vpc_id      = var.vpc_id != null ? var.vpc_id : data.aws_subnet.selected[0].vpc_id
+  vpc_id      = data.aws_subnet.selected[0].vpc_id
 
   ingress {
     description = "Allow all within SG"
@@ -77,7 +77,6 @@ resource "aws_eks_cluster" "cluster" {
   vpc_config {
     subnet_ids         = var.subnet_ids
     security_group_ids = aws_security_group.eks_cluster[*].id
-    vpc_id             = var.vpc_id
   }
 
   depends_on = [
@@ -93,7 +92,7 @@ resource "aws_eks_cluster" "cluster" {
 
 # Fargate profile IAM role
 resource "aws_iam_role" "fargate_pod_execution_role" {
-  count = var.cluster_name != null && var.use_fargate ? 1 : 0
+  count = var.cluster_name != null ? 1 : 0
   name  = "${var.cluster_name}-fargate-pod-execution-role"
 
   assume_role_policy = jsonencode({
@@ -114,14 +113,14 @@ resource "aws_iam_role" "fargate_pod_execution_role" {
 }
 
 resource "aws_iam_role_policy_attachment" "fargate_pod_execution_policy" {
-  count      = var.cluster_name != null && var.use_fargate ? 1 : 0
+  count      = var.cluster_name != null ? 1 : 0
   role       = aws_iam_role.fargate_pod_execution_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy"
 }
 
 # Create Fargate profile
 resource "aws_eks_fargate_profile" "fargate_profile" {
-  count              = var.cluster_name != null && length(var.subnet_ids) > 0 && var.use_fargate ? 1 : 0
+  count              = var.cluster_name != null && length(var.subnet_ids) > 0 ? 1 : 0
   cluster_name       = aws_eks_cluster.cluster[0].name
   fargate_profile_name   = "${var.cluster_name}-fargate-profile"
   pod_execution_role_arn = aws_iam_role.fargate_pod_execution_role[0].arn
@@ -146,7 +145,7 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
   }
 }
 
-# Outputs
+# Outputs (Consolidated to avoid duplicates)
 output "cluster_name" {
   value = aws_eks_cluster.cluster[0].name
 }
