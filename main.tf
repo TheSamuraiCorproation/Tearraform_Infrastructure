@@ -59,9 +59,9 @@ locals {
   # Validation to ensure required fields are present
   validate_eks = local.eks_config != null ? (
     length(local.subnet_ids) > 0 &&
-    local.eks_config.cluster_name != null &&
-    owner_name != null &&
-    vpc_id != null
+    local.eks_config.cluster_name != "" &&
+    local.owner_name != "" &&
+    local.vpc_id != ""
   ) : true
 }
 
@@ -82,7 +82,7 @@ module "eks" {
   cluster_name       = local.unique_cluster_name
   kubernetes_version = local.kubernetes_version
   subnet_ids         = local.subnet_ids
-  vpc_id             = local.payload.service_type == "eks" ? local.vpc_id : null  # Pass vpc_id only for EKS
+  vpc_id             = local.payload.service_type == "eks" ? local.vpc_id : null
   use_fargate        = local.use_fargate
   fargate_selectors  = local.fargate_selectors
   owner_name         = local.owner_name
