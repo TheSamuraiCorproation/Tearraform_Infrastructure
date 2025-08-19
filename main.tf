@@ -2,20 +2,23 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Generate a unique suffix for the key name
+# Generate a unique suffix for the key name (used only for EC2)
 resource "random_id" "unique_suffix" {
   byte_length = 4
+  count       = local.payload.service_type == "ec2" ? 1 : 0
 }
 
-# Generate RSA private key for EC2 key pair
+# Generate RSA private key for EC2 key pair (only for EC2)
 resource "tls_private_key" "ec2_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
+  count     = local.payload.service_type == "ec2" ? 1 : 0
 }
 
 resource "aws_key_pair" "ec2_key_pair" {
-  key_name   = "client-access-key-${random_id.unique_suffix.hex}"
-  public_key = tls_private_key.ec2_key.public_key_openssh
+  count     = local.payload.service_type == "ec2" ? 1 : 0
+  key_name   = "client-access-key-${random_id.unique_suffix[0].hex}"
+  public_key = tls_private_key.ec2_key[0].public_key_openssh
 
   lifecycle {
     ignore_changes = [key_name]
@@ -23,7 +26,7 @@ resource "aws_key_pair" "ec2_key_pair" {
 }
 
 output "private_key_pem" {
-  value     = tls_private_key.ec2_key.private_key_pem
+  value     = local.payload.service_type == "ec2" ? tls_private_key.ec2_key[0].private_key_pem : null
   sensitive = true
 }
 
@@ -36,10 +39,12 @@ data "aws_s3_object" "payload" {
 locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
 
+  # EC2-specific locals
+  instance_keys    = local.payload.service_type == "ec2" ? keys(local.payload.instances) : []
+  instance_config  = local.payload.service_type == "ec2" ? local.payload.instances[local.instance_keys[0]] : null
+
+  # EKS-specific locals
   unique_cluster_name = local.payload.service_type == "eks" ? "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}" : ""
-  # Dynamically get the first instance key from the payload
-  instance_keys = keys(local.payload.instances)
-  instance_config = local.payload.service_type == "ec2" ? local.payload.instances[local.instance_keys[0]] : null
 }
 
 # Conditionally deploy EC2 if service_type == "ec2"
@@ -47,7 +52,7 @@ module "ec2" {
   source           = "./modules/ec2"
   count            = local.payload.service_type == "ec2" ? 1 : 0
   instances        = local.payload.instances
-  key_name         = aws_key_pair.ec2_key_pair.key_name
+  key_name         = aws_key_pair.ec2_key_pair[0].key_name
   security_group_id = local.instance_config != null ? local.instance_config.security_groups[0] : null
   subnet_id        = local.instance_config != null ? local.instance_config.subnet_id : null
 }
@@ -58,11 +63,11 @@ module "eks" {
   count              = local.payload.service_type == "eks" ? 1 : 0
   cluster_name       = local.payload.eks.cluster_name
   kubernetes_version = local.payload.eks.kubernetes_version
+  vpc_id             = local.payload.eks.vpc_id
   subnet_ids         = local.payload.eks.subnet_ids
+  use_fargate        = lookup(local.payload.eks, "use_fargate", false)
   fargate_selectors  = lookup(local.payload.eks, "fargate_selectors", [
-    {
-      namespace = "default"
-    }
+    { namespace = "default" }
   ])
 }
 
@@ -71,17 +76,15 @@ output "ec2_public_ips" {
   value = local.payload.service_type == "ec2" ? module.ec2[0].public_ips : null
 }
 
-# Outputs for EKS cluster endpoint (only when EKS is deployed)
-output "eks_cluster_endpoint" {
-  value = local.payload.service_type == "eks" ? module.eks[0].cluster_endpoint : null
-}
-
-# Outputs for EKS cluster name (only when EKS is deployed)
+# Outputs for EKS cluster details (only when EKS is deployed)
 output "cluster_name" {
   value = local.payload.service_type == "eks" ? module.eks[0].cluster_name : null
 }
 
-# Outputs for EKS certificate authority data (only when EKS is deployed)
+output "eks_cluster_endpoint" {
+  value = local.payload.service_type == "eks" ? module.eks[0].cluster_endpoint : null
+}
+
 output "eks_cluster_certificate_authority_data" {
   value = local.payload.service_type == "eks" ? module.eks[0].cluster_certificate_authority_data : null
 }

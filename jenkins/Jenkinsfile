@@ -126,24 +126,19 @@ pipeline {
             try {
               def payload = readJSON file: 'payload.json'
               echo "Service Type detected: ${payload.service_type}"
+              sh """
+                terraform apply \
+                  -var 's3_payload_bucket=${params.BUCKET}' \
+                  -var 's3_payload_key=${env.S3_PAYLOAD_KEY}' \
+                  -auto-approve || exit 1
+              """
               if (payload.service_type == 'ec2') {
                 sh """
-                  terraform apply \
-                    -var 's3_payload_bucket=${params.BUCKET}' \
-                    -var 's3_payload_key=${env.S3_PAYLOAD_KEY}' \
-                    -var 'jenkins_url=${JENKINS_URL}' \
-                    -auto-approve || exit 1
                   terraform output -raw private_key_pem > client-access-key.pem || exit 1
                   chmod 400 client-access-key.pem || exit 1
                 """
-                archiveArtifacts artifacts: 'client-access-key.pem' // Archived here
+                archiveArtifacts artifacts: 'client-access-key.pem'
               } else if (payload.service_type == 'eks') {
-                sh """
-                  terraform apply \
-                    -var 's3_payload_bucket=${params.BUCKET}' \
-                    -var 's3_payload_key=${env.S3_PAYLOAD_KEY}' \
-                    -auto-approve || exit 1
-                """
                 def clusterName = sh(script: "terraform output -raw cluster_name || echo 'no_cluster'", returnStdout: true).trim()
                 if (clusterName == 'no_cluster') {
                   echo "No cluster name output, skipping EKS config"
@@ -151,13 +146,9 @@ pipeline {
                   echo "Cluster created: ${clusterName}"
                   sh """
                     aws eks update-kubeconfig --name ${clusterName} --region ${AWS_DEFAULT_REGION} || true
-                    echo "kubectl cluster-info" || true
                     kubectl cluster-info || true
-                    kubectl get nodes --all-namespaces || true
                   """
                 }
-              } else {
-                error "Invalid or unsupported service_type: ${payload.service_type}"
               }
             } catch (Exception e) {
               error "Failed to apply Terraform: ${e.message}"
@@ -244,10 +235,8 @@ pipeline {
               if (!clientEmail) {
                 error "No client_email found in payload"
               }
-              // Debug: Check file existence and content
               sh "test -f client-access-key.pem || { echo 'Key file missing'; exit 1; }"
               sh "ls -l client-access-key.pem"
-              // No need to re-archive; use existing artifact
               emailext(
                 to: clientEmail,
                 replyTo: 'no-reply@apollo-dojo.com',
@@ -273,7 +262,6 @@ pipeline {
                 attachmentsPattern: 'client-access-key.pem',
                 mimeType: 'text/plain'
               )
-              // Upload SSH details to S3
               def privateKey = sh(script: "terraform output -raw private_key_pem || echo 'no_key'", returnStdout: true).trim()
               if (privateKey == 'no_key') {
                 error "Failed to retrieve private key from Terraform output"
