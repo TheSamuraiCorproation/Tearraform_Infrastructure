@@ -1,11 +1,13 @@
 variable "cluster_name" {
   description = "Name of the EKS cluster"
   type        = string
+  nullable    = false
 }
 
 variable "subnet_ids" {
   description = "List of subnet IDs"
   type        = list(string)
+  nullable    = false
 }
 
 variable "kubernetes_version" {
@@ -16,7 +18,7 @@ variable "kubernetes_version" {
 
 variable "fargate_selectors" {
   description = "List of Fargate selectors with optional labels"
-  type = list(object({
+  type        = list(object({
     namespace = string
     labels    = optional(map(string))
   }))
@@ -27,3 +29,20 @@ variable "fargate_selectors" {
   ]
 }
 
+variable "owner_name" {
+  description = "Owner of the cluster"
+  type        = string
+  nullable    = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID for the EKS cluster"
+  type        = string
+  nullable    = true
+}
+
+variable "use_fargate" {
+  description = "Flag to enable Fargate profiles"
+  type        = bool
+  default     = false
+}
