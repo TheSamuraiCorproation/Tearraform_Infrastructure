@@ -43,7 +43,7 @@ locals {
   instance_keys    = local.payload.service_type == "ec2" ? keys(local.payload.instances) : []
   instance_config  = local.payload.service_type == "ec2" ? local.payload.instances[local.instance_keys[0]] : null
 
-  # EKS-specific locals
+  # EKS-specific locals (only defined if service_type is eks)
   unique_cluster_name = local.payload.service_type == "eks" ? "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}" : ""
 }
 
@@ -61,14 +61,12 @@ module "ec2" {
 module "eks" {
   source             = "./modules/eks"
   count              = local.payload.service_type == "eks" ? 1 : 0
-  cluster_name       = local.payload.eks.cluster_name
-  kubernetes_version = local.payload.eks.kubernetes_version
-  vpc_id             = local.payload.eks.vpc_id
-  subnet_ids         = local.payload.eks.subnet_ids
-  use_fargate        = lookup(local.payload.eks, "use_fargate", false)
-  fargate_selectors  = lookup(local.payload.eks, "fargate_selectors", [
+  cluster_name       = local.payload.service_type == "eks" ? local.payload.eks.cluster_name : null
+  kubernetes_version = local.payload.service_type == "eks" ? local.payload.eks.kubernetes_version : null
+  subnet_ids         = local.payload.service_type == "eks" ? local.payload.eks.subnet_ids : null
+  fargate_selectors  = local.payload.service_type == "eks" ? lookup(local.payload.eks, "fargate_selectors", [
     { namespace = "default" }
-  ])
+  ]) : null
 }
 
 # Outputs for EC2 public IPs (only when EC2 is deployed)
