@@ -145,7 +145,7 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
   }
 }
 
-# Outputs (Consolidated to avoid duplicates)
+# Outputs (Consolidated)
 output "cluster_name" {
   value = aws_eks_cluster.cluster[0].name
 }
@@ -156,4 +156,12 @@ output "cluster_endpoint" {
 
 output "cluster_certificate_authority_data" {
   value = aws_eks_cluster.cluster[0].certificate_authority[0].data
+}
+
+output "cluster_id" {
+  value = aws_eks_cluster.cluster[0].id
+}
+
+output "fargate_profile_name" {
+  value = aws_eks_fargate_profile.fargate_profile[0].fargate_profile_name
 }
