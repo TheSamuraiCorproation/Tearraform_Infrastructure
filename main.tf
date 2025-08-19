@@ -43,6 +43,9 @@ locals {
   instance_keys    = local.payload.service_type == "ec2" ? keys(local.payload.instances) : []
   instance_config  = local.payload.service_type == "ec2" ? local.payload.instances[local.instance_keys[0]] : null
 
+  # Fallback for subnet_id if not provided
+  subnet_id        = local.instance_config != null ? lookup(local.instance_config, "subnet_id", "subnet-DEFAULT") : null
+
   # EKS-specific locals (only defined if service_type is eks)
   unique_cluster_name = local.payload.service_type == "eks" ? "${local.payload.eks.cluster_name}-${replace(local.payload.user_name, " ", "-")}" : ""
 }
@@ -54,7 +57,7 @@ module "ec2" {
   instances        = local.payload.instances
   key_name         = aws_key_pair.ec2_key_pair[0].key_name
   security_group_id = local.instance_config != null ? local.instance_config.security_groups[0] : null
-  subnet_id        = local.instance_config != null ? local.instance_config.subnet_id : null
+  subnet_id        = local.subnet_id
 }
 
 # Conditionally deploy EKS if service_type == "eks"
