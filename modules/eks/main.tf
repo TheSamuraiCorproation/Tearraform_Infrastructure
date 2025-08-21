@@ -1,4 +1,4 @@
-# IAM Role for EKS Cluster
+# IAM Role and Policy Attachments for EKS Cluster
 resource "aws_iam_role" "eks_cluster_role" {
   count = var.cluster_name != null ? 1 : 0
   name  = "${var.cluster_name}-eks-cluster-role"
@@ -20,31 +20,24 @@ resource "aws_iam_role" "eks_cluster_role" {
   }
 }
 
-# Attach AmazonEKSClusterPolicy
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   count      = var.cluster_name != null ? 1 : 0
   role       = aws_iam_role.eks_cluster_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-# Attach additional policies for cluster management
 resource "aws_iam_role_policy_attachment" "eks_service_policy" {
   count      = var.cluster_name != null ? 1 : 0
   role       = aws_iam_role.eks_cluster_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
 }
 
-data "aws_subnet" "selected" {
-  count = length(var.subnet_ids) > 0 ? 1 : 0
-  id    = var.subnet_ids[0]
-}
-
-# Security group for EKS
+# Security Group for EKS Cluster
 resource "aws_security_group" "eks_cluster" {
   count       = var.cluster_name != null ? 1 : 0
   name_prefix = "${var.cluster_name}-sg-"
   description = "Security group for EKS cluster"
-  vpc_id      = data.aws_subnet.selected[0].vpc_id
+  vpc_id      = var.vpc_id
 
   ingress {
     description = "Allow all within SG"
@@ -67,7 +60,7 @@ resource "aws_security_group" "eks_cluster" {
   }
 }
 
-# Create the EKS Cluster
+# EKS Cluster Resource
 resource "aws_eks_cluster" "cluster" {
   count    = var.cluster_name != null && length(var.subnet_ids) > 0 ? 1 : 0
   name     = var.cluster_name
@@ -90,9 +83,9 @@ resource "aws_eks_cluster" "cluster" {
   }
 }
 
-# Fargate profile IAM role
+# IAM Role and Policy Attachment for Fargate Profiles
 resource "aws_iam_role" "fargate_pod_execution_role" {
-  count = var.cluster_name != null ? 1 : 0
+  count = var.cluster_name != null && var.use_fargate ? 1 : 0
   name  = "${var.cluster_name}-fargate-pod-execution-role"
 
   assume_role_policy = jsonencode({
@@ -113,25 +106,22 @@ resource "aws_iam_role" "fargate_pod_execution_role" {
 }
 
 resource "aws_iam_role_policy_attachment" "fargate_pod_execution_policy" {
-  count      = var.cluster_name != null ? 1 : 0
+  count      = var.cluster_name != null && var.use_fargate ? 1 : 0
   role       = aws_iam_role.fargate_pod_execution_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy"
 }
 
-# Create Fargate profile
+# Fargate Profile Resources
 resource "aws_eks_fargate_profile" "fargate_profile" {
-  count              = var.cluster_name != null && length(var.subnet_ids) > 0 ? 1 : 0
+  count              = var.cluster_name != null && length(var.subnet_ids) > 0 && var.use_fargate ? length(var.fargate_selectors) : 0
   cluster_name       = aws_eks_cluster.cluster[0].name
-  fargate_profile_name   = "${var.cluster_name}-fargate-profile"
+  fargate_profile_name = "${var.cluster_name}-fargate-profile-${count.index}"
   pod_execution_role_arn = aws_iam_role.fargate_pod_execution_role[0].arn
-  subnet_ids           = var.subnet_ids
+  subnet_ids         = var.subnet_ids
 
-  dynamic "selector" {
-    for_each = var.fargate_selectors
-    content {
-      namespace = selector.value.namespace
-      labels    = lookup(selector.value, "labels", null)
-    }
+  selector {
+    namespace = var.fargate_selectors[count.index].namespace
+    labels    = var.fargate_selectors[count.index].labels
   }
 
   depends_on = [
@@ -145,7 +135,7 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
   }
 }
 
-# Outputs (Consolidated)
+# Outputs
 output "cluster_name" {
   value = aws_eks_cluster.cluster[0].name
 }
@@ -162,6 +152,6 @@ output "cluster_id" {
   value = aws_eks_cluster.cluster[0].id
 }
 
-output "fargate_profile_name" {
-  value = aws_eks_fargate_profile.fargate_profile[0].fargate_profile_name
+output "fargate_profile_names" {
+  value = aws_eks_fargate_profile.fargate_profile[*].fargate_profile_name
 }
