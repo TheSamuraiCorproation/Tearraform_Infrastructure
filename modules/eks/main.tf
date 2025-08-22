@@ -107,10 +107,10 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
   depends_on = [
     aws_eks_cluster.cluster,
     aws_iam_role_policy_attachment.fargate_pod_execution_policy
-  }
+  ] # Added closing bracket here
 }
 
-# Outputs
+# Outputs (unchanged)
 output "cluster_name" {
   value = aws_eks_cluster.cluster[0].name
 }
