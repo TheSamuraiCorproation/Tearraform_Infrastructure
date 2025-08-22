@@ -53,7 +53,7 @@ locals {
   subnet_ids         = local.eks_config != null ? local.eks_config.subnet_ids : []
   use_fargate        = local.eks_config != null ? local.eks_config.use_fargate : false
   fargate_selectors  = local.eks_config != null ? local.eks_config.fargate_selectors : []  # Default to empty list, module handles type
-  owner_name         = local.eks_config != null ? local.payload.user_name : null
+  owner_name         = local.eks_config != null ? local.eks_config.Owner : null  # Use Owner from eks_config
 
   # Validation to ensure required fields are present
   validate_eks = local.eks_config != null ? (

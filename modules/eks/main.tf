@@ -13,11 +13,6 @@ resource "aws_iam_role" "eks_cluster_role" {
       }
     }]
   })
-
-  tags = {
-    Environment = "Development"
-    Owner       = var.owner_name
-  }
 }
 
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
@@ -53,11 +48,6 @@ resource "aws_security_group" "eks_cluster" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = {
-    Name        = "${var.cluster_name}-sg"
-    Environment = "Development"
-  }
 }
 
 # EKS Cluster Resource
@@ -76,11 +66,6 @@ resource "aws_eks_cluster" "cluster" {
     aws_iam_role_policy_attachment.eks_cluster_policy,
     aws_iam_role_policy_attachment.eks_service_policy
   ]
-
-  tags = {
-    Environment = "Development"
-    Owner       = var.owner_name
-  }
 }
 
 # IAM Role and Policy Attachment for Fargate Profiles
@@ -98,11 +83,6 @@ resource "aws_iam_role" "fargate_pod_execution_role" {
       }
     }]
   })
-
-  tags = {
-    Environment = "Development"
-    Owner       = var.owner_name
-  }
 }
 
 resource "aws_iam_role_policy_attachment" "fargate_pod_execution_policy" {
@@ -127,11 +107,6 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
   depends_on = [
     aws_eks_cluster.cluster,
     aws_iam_role_policy_attachment.fargate_pod_execution_policy
-  ]
-
-  tags = {
-    Environment = "Development"
-    Owner       = var.owner_name
   }
 }
 
