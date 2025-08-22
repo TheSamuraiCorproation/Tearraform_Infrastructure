@@ -40,7 +40,7 @@ data "aws_s3_object" "payload" {
 locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
 
-  # EC2-specific locals - 
+  # EC2-specific locals - untouched
   instance_keys    = local.payload.service_type == "ec2" ? keys(local.payload.instances) : []
   instance_config  = local.payload.service_type == "ec2" ? local.payload.instances[local.instance_keys[0]] : null
   subnet_id        = local.instance_config != null ? lookup(local.instance_config, "subnet_id", "subnet-DEFAULT") : null
@@ -52,8 +52,8 @@ locals {
   vpc_id             = local.eks_config != null ? local.eks_config.vpc_id : null
   subnet_ids         = local.eks_config != null ? local.eks_config.subnet_ids : []
   use_fargate        = local.eks_config != null ? local.eks_config.use_fargate : false
-  fargate_selectors  = local.eks_config != null ? local.eks_config.fargate_selectors : [{}]  # Default to empty object tuple
-  owner_name         = local.eks_config != null ? local.payload.user_name : null  # Use payload.user_name instead
+  fargate_selectors  = local.eks_config != null ? local.eks_config.fargate_selectors : []  # Use empty list as default
+  owner_name         = local.eks_config != null ? local.payload.user_name : null  # Use payload.user_name
 
   # Validation to ensure required fields are present
   validate_eks = local.eks_config != null ? (
