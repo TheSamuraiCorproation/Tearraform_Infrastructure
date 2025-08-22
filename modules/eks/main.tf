@@ -1,7 +1,15 @@
+# Generate a unique suffix for role names
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+  keepers = {
+    cluster_name = var.cluster_name
+  }
+}
+
 # IAM Role and Policy Attachments for EKS Cluster
 resource "aws_iam_role" "eks_cluster_role" {
   count = var.cluster_name != null ? 1 : 0
-  name  = "${var.cluster_name}-eks-cluster-role"
+  name  = "${var.cluster_name}-eks-cluster-role-${random_id.unique_suffix.hex}" # Add random suffix
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -71,7 +79,7 @@ resource "aws_eks_cluster" "cluster" {
 # IAM Role and Policy Attachment for Fargate Profiles
 resource "aws_iam_role" "fargate_pod_execution_role" {
   count = var.cluster_name != null && var.use_fargate ? 1 : 0
-  name  = "${var.cluster_name}-fargate-pod-execution-role"
+  name  = "${var.cluster_name}-fargate-pod-execution-role-${random_id.unique_suffix.hex}" # Add random suffix
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -107,7 +115,7 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
   depends_on = [
     aws_eks_cluster.cluster,
     aws_iam_role_policy_attachment.fargate_pod_execution_policy
-  ] # Added closing bracket here
+  ]
 }
 
 # Outputs (unchanged)
