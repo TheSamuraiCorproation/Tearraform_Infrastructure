@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 # Pattern to match files like "hash_id_ai_output_timestamp.json"
 PATTERN = re.compile(r"^[0-9a-f]+_ai_output_\d+\.json$")
 # Default JENKINS_URL, override with environment variable if set
-JENKINS_URL = os.environ.get("JENKINS_URL", "https://9216d38c2a3f.ngrok-free.app")
+JENKINS_URL = os.environ.get("JENKINS_URL", "https://4585943c559d.ngrok-free.app")
 JOB_NAME = os.environ.get("JOB_NAME", "terraform-deploy")
 JENKINS_TOKEN = os.environ.get("JENKINS_TOKEN", "THE_SAMURAI_TOKEN")
 JENKINS_USER = os.environ.get("JENKINS_USER", "admin")

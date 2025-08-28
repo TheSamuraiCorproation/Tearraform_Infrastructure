@@ -6,7 +6,7 @@ pipeline {
     }
     environment {
         AWS_DEFAULT_REGION = 'eu-central-1'
-        JENKINS_URL = "${params.jenkins_url ?: 'https://9216d38c2a3f.ngrok-free.app'}"
+        JENKINS_URL = "${params.jenkins_url ?: 'https://4585943c559d.ngrok-free.app'}"
         TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
     }
     stages {
