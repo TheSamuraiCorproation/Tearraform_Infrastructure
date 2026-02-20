@@ -14,15 +14,19 @@ pipeline {
     stages {
 
         stage('Checkout Repository') {
-            steps {
-                script {
-                    checkout([$class: 'GitSCM',
-                        branches: [[name: '*/main']],
-                        userRemoteConfigs: [[url: 'https://github.com/NasriMohamedHedi/terraform-infra.git']]
-                    ])
-                }
-            }
+    steps {
+        script {
+            checkout([$class: 'GitSCM',
+                branches: [[name: '*/main']],
+                userRemoteConfigs: [[
+                    url: 'https://github.com/NasriMohamedHedi/terraform-infra.git',
+                    credentialsId: 'github-terraform-token'
+                ]]
+            ])
         }
+    }
+}
+
 
         stage('Find Payload in S3') {
             steps {
