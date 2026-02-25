@@ -1,118 +1,138 @@
 ---
-- name: Configure EC2 instance (Golden AMI)
+- name: Configure EC2 instance and deploy container tools
   hosts: all
   become: yes
 
   vars:
     tools_to_install: []
-    cloudwatch_agent_deb_url: "https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
-    cloudwatch_agent_local: "/tmp/amazon-cloudwatch-agent.deb"
-    cloudwatch_agent_conf_dest: "/etc/amazon-cloudwatch-agent.json"
+    docker_pkg: docker.io
+    awscli_pkg: awscli
 
   tasks:
+    - name: Gather facts
+      ansible.builtin.setup:
 
-  - name: Gather facts
-    ansible.builtin.setup:
+    - name: Show tools to install
+      ansible.builtin.debug:
+        msg: "Tools requested: {{ tools_to_install | default([]) }}"
 
-  - name: Show tools to install
-    ansible.builtin.debug:
-      msg: "Tools requested: {{ tools_to_install | default([]) }}"
+    - name: Ensure apt cache up to date
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
 
-  - name: Ensure apt cache is up to date
-    ansible.builtin.apt:
-      update_cache: yes
-      cache_valid_time: 3600
+    - name: Install basic packages
+      ansible.builtin.apt:
+        name:
+          - "{{ docker_pkg }}"
+          - python3
+          - python3-pip
+          - curl
+          - jq
+          - apt-transport-https
+          - ca-certificates
+        state: present
 
-  - name: Install base utilities (wget, curl, jq)
-    ansible.builtin.apt:
-      name:
-        - wget
-        - curl
-        - jq
-        - ca-certificates
-        - apt-transport-https
-        - lsb-release
-        - gnupg
-      state: present
+    - name: Ensure docker service started and enabled
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: yes
 
-  ####################################################################
-  # Install Amazon CloudWatch Agent (deb) - idempotent
-  ####################################################################
-  - name: Check if CloudWatch agent binary exists
-    ansible.builtin.stat:
-      path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
-    register: cw_agent_bin
+    - name: Ensure pip docker library available (for potential docker modules)
+      ansible.builtin.pip:
+        name: docker
+        executable: pip3
+        state: present
 
-  - name: Download amazon-cloudwatch-agent.deb (only if not present)
-    ansible.builtin.get_url:
-      url: "{{ cloudwatch_agent_deb_url }}"
-      dest: "{{ cloudwatch_agent_local }}"
-      mode: "0644"
-    when: not cw_agent_bin.stat.exists
+    - name: Ensure awscli present (used for ecr login)
+      ansible.builtin.apt:
+        name: "{{ awscli_pkg }}"
+        state: present
+      register: awscli_installed
+      failed_when: awscli_installed is failed and false  # don't hard fail on minor apt issues
 
-  - name: Install amazon-cloudwatch-agent (dpkg)
-    ansible.builtin.command:
-      cmd: "dpkg -i {{ cloudwatch_agent_local }}"
-    register: dpkg_res
-    changed_when: dpkg_res.rc == 0
-    failed_when: dpkg_res.rc not in [0,1]
-    when: not cw_agent_bin.stat.exists
-    ignore_errors: true
+    - name: Create helper directory for Docker logs
+      ansible.builtin.file:
+        path: /var/log/docker-tools
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
 
-  - name: Fix missing deps after dpkg (apt-get -f install)
-    ansible.builtin.command:
-      cmd: apt-get -f -y install
-    register: apt_fix
-    changed_when: "'Setting up' in apt_fix.stdout or apt_fix.rc == 0"
+    #################################################################
+    # Deploy requested container tools (works with DockerHub or ECR)
+    # Each tool entry expected (recommended):
+    # { "name": "suricata", "image": "430118.../suricata-custom:latest", "ports": [ "80:80" ] }
+    #################################################################
+    - name: Normalize tools list (ensure dict structure)
+      ansible.builtin.set_fact:
+        normalized_tools: >-
+          {{
+            tools_to_install | default([]) | map('combine', {'name': '', 'image': '', 'ports': []}) | list
+          }}
 
-  - name: Verify cloudwatch agent installed (stat again)
-    ansible.builtin.stat:
-      path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
-    register: cw_agent_installed
+    - name: Deploy each requested tool (loop)
+      ansible.builtin.block:
+        - name: Validate tool has image
+          ansible.builtin.assert:
+            that:
+              - item.image is defined
+              - item.image | length > 0
+            fail_msg: "Tool {{ item.name | default('?') }} missing 'image' property; cannot proceed."
 
-  - name: Fail early if agent not installed
-    ansible.builtin.fail:
-      msg: "CloudWatch agent installation failed or binary missing. See previous logs."
-    when: not cw_agent_installed.stat.exists
+        - name: If ECR image, login via awscli (uses instance role)
+          ansible.builtin.shell: >
+            aws ecr get-login-password --region {{ aws_region | default('eu-central-1') }} |
+            docker login --username AWS --password-stdin {{ (item.image.split('/')[0]) }}
+          args:
+            warn: false
+          when: item.image is search('\\.dkr\\.ecr\\.')
+          register: ecr_login
+          failed_when: ecr_login.rc != 0 and ('Login Succeeded' not in (ecr_login.stdout + ecr_login.stderr))
+          changed_when: "'Login Succeeded' in (ecr_login.stdout + ecr_login.stderr)"
 
-  - name: Deploy CloudWatch agent configuration from template
-    ansible.builtin.template:
-      src: "amazon-cloudwatch-agent.j2"
-      dest: "{{ cloudwatch_agent_conf_dest }}"
-      owner: root
-      group: root
-      mode: '0644'
+        - name: Pull image {{ item.image }}
+          ansible.builtin.shell: docker pull {{ item.image }}
+          register: pull_result
+          changed_when: "'Downloaded newer image' in pull_result.stdout or 'Status: Downloaded' in pull_result.stdout or pull_result.rc == 0"
 
-  - name: Start/Restart CloudWatch agent with the config
-    ansible.builtin.command:
-      cmd: "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop || true; /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a start -m ec2 -c file:{{ cloudwatch_agent_conf_dest }}"
-    register: cw_ctl
-    changed_when: "'started' in cw_ctl.stdout.lower() or cw_ctl.rc == 0"
+        - name: Stop existing container if present
+          ansible.builtin.shell: |
+            if docker ps -a --format '{{'{{'}}.Names{{'}}'}}' | grep -x {{ item.name }} >/dev/null 2>&1; then
+              docker rm -f {{ item.name }} || true
+            fi
+          args:
+            warn: false
 
-  - name: Wait for CloudWatch agent to show running
-    ansible.builtin.command:
-      cmd: "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -m ec2 -a status"
-    register: cw_status
-    retries: 5
-    delay: 6
-    until: cw_status.stdout is search("running") or cw_status.rc == 0
-    failed_when: cw_status.rc != 0 and ('running' not in cw_status.stdout.lower())
+        - name: Run container {{ item.name }}
+          ansible.builtin.shell: |
+            # build port flags
+            PORT_FLAGS=""
+            {% raw %}{% endraw %}
+            {% for p in item.ports %}
+            PORT_FLAGS="$PORT_FLAGS -p {{ p }}"
+            {% endfor %}
+            # run container (detached) with restart unless-stopped
+            docker run -d --name {{ item.name }} $PORT_FLAGS --restart unless-stopped {{ item.image }}
+          args:
+            executable: /bin/bash
+          register: run_res
+          failed_when: run_res.rc != 0
 
-  - name: Show CloudWatch agent status (debug)
-    ansible.builtin.debug:
-      msg: "{{ cw_status.stdout | default('no status output') }}"
+        - name: Wait for container to be healthy (simple check)
+          ansible.builtin.shell: |
+            for i in $(seq 1 12); do
+              docker ps --filter "name={{ item.name }}" --filter "status=running" -q && exit 0 || sleep 5
+            done
+            exit 1
+          register: container_running
+          failed_when: container_running.rc != 0
 
-  ####################################################################
-  # Install requested tools
-  ####################################################################
-  - name: Install requested tools
-    ansible.builtin.apt:
-      name: "{{ tools_to_install }}"
-      state: present
-    when: tools_to_install | length > 0
+      loop: "{{ normalized_tools }}"
+      loop_control:
+        label: "{{ item.name }}"
 
-  - name: Final message
-    ansible.builtin.debug:
-      msg: |
-        EC2 configuration finished.
-        Golden AMI assumed (desktop & DCV already installed).
+    - name: Final message
+      ansible.builtin.debug:
+        msg: "EC2 configuration and container deployment completed."
