@@ -7,7 +7,7 @@ variable "instances" {
     subnet_id        = string
     key_name         = optional(string)
     tags             = optional(map(string))
-    tools_to_install = optional(list(string))
+    tools_to_install = optional(list(any))  
   }))
 }
 
