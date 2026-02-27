@@ -5,9 +5,11 @@
 
   vars:
     tools_to_install: []
+    aws_region: eu-central-1
     cloudwatch_agent_deb_url: "https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_local: "/tmp/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_conf_dest: "/etc/amazon-cloudwatch-agent.json"
+
     docker_packages:
       - apt-transport-https
       - ca-certificates
@@ -43,7 +45,9 @@
           - gnupg
         state: present
 
-    # --- CloudWatch agent ---
+    ########################################################################
+    # CloudWatch agent (unchanged)
+    ########################################################################
     - name: Check if CloudWatch agent binary exists
       ansible.builtin.stat:
         path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
@@ -68,8 +72,6 @@
     - name: Fix missing deps after dpkg
       ansible.builtin.command:
         cmd: apt-get -f -y install
-      register: apt_fix
-      changed_when: "'Setting up' in apt_fix.stdout or apt_fix.rc == 0"
 
     - name: Verify cloudwatch agent installed
       ansible.builtin.stat:
@@ -108,59 +110,83 @@
       ansible.builtin.debug:
         msg: "{{ cw_status.stdout | default('no status output') }}"
 
-    # --- Docker & AWS CLI ---
-    - name: Ensure docker + dependencies present if any ECR images requested
-      when: (tools_to_install | select('is mapping') | list) | length > 0
-      block:
-        - name: Install docker and extras
-          ansible.builtin.apt:
-            name: "{{ docker_packages }}"
-            state: present
-            update_cache: yes
+    ########################################################################
+    # SAFE CLASSIFICATION (no select('is mapping') / no select('is string'))
+    ########################################################################
+    - name: Initialize tool lists
+      ansible.builtin.set_fact:
+        apt_packages: []
+        ecr_images: []
 
-        - name: Ensure docker service is started
-          ansible.builtin.service:
-            name: docker
-            state: started
-            enabled: yes
+    - name: Classify APT items into apt_packages
+      ansible.builtin.set_fact:
+        apt_packages: "{{ apt_packages + [item] }}"
+      when: item is string
+      loop: "{{ tools_to_install | default([]) }}"
 
-        - name: Ensure pip3 is present
-          ansible.builtin.apt:
-            name: python3-pip
-            state: present
+    - name: Classify mapping items into ecr_images
+      ansible.builtin.set_fact:
+        ecr_images: "{{ ecr_images + [item] }}"
+      when: item is mapping
+      loop: "{{ tools_to_install | default([]) }}"
 
-        - name: Install AWS CLI v2 (if not present)
-          ansible.builtin.shell: |
-            if ! command -v aws >/dev/null 2>&1; then
-              tmpdir=$(mktemp -d)
-              cd $tmpdir
-              curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-              unzip awscliv2.zip
-              sudo ./aws/install -i /usr/local/aws-cli -b /usr/local/bin || true
-            fi
-          args:
-            creates: /usr/local/bin/aws
+    - name: Debug classified tools
+      ansible.builtin.debug:
+        msg:
+          - "APT packages: {{ apt_packages }}"
+          - "ECR images: {{ ecr_images }}"
 
-        - name: Ensure /usr/local/bin is in PATH for this play
-          ansible.builtin.shell: |
-            export PATH=/usr/local/bin:$PATH
-
-    # --- Classify tools ---
-    - name: Collect apt-only packages
-      set_fact:
-        apt_packages: "{{ (tools_to_install | default([]) ) | select('is string') | list }}"
-
-    - name: Collect ecr images
-      set_fact:
-        ecr_images: "{{ (tools_to_install | default([]) ) | select('is mapping') | list }}"
-
-    - name: Install apt packages requested
+    ########################################################################
+    # Install apt packages (if any)
+    ########################################################################
+    - name: Install requested APT packages
       ansible.builtin.apt:
         name: "{{ apt_packages }}"
         state: present
       when: apt_packages | length > 0
 
-    - name: Deploy container(s) from ECR
+    ########################################################################
+    # If there are ECR images, install Docker + AWS CLI then deploy containers
+    ########################################################################
+    - name: Install docker and extras (if ECR images requested)
+      when: ecr_images | length > 0
+      block:
+        - name: Install docker dependencies
+          ansible.builtin.apt:
+            name: "{{ docker_packages }}"
+            state: present
+            update_cache: yes
+
+        - name: Ensure docker is started
+          ansible.builtin.service:
+            name: docker
+            state: started
+            enabled: yes
+
+        - name: Ensure unzip present (aws cli installer)
+          ansible.builtin.apt:
+            name: unzip
+            state: present
+
+        - name: Install AWS CLI v2 (if not present)
+          ansible.builtin.shell: |
+            set -eux
+            tmpdir=$(mktemp -d)
+            cd "$tmpdir"
+            curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+            unzip -q awscliv2.zip
+            sudo ./aws/install --update -i /usr/local/aws-cli -b /usr/local/bin || true
+          args:
+            creates: /usr/local/bin/aws
+
+        - name: Ensure /usr/local/bin is in PATH for subsequent shell tasks
+          ansible.builtin.lineinfile:
+            path: /etc/profile.d/aws_path.sh
+            line: 'export PATH=/usr/local/bin:$PATH'
+            create: yes
+            state: present
+
+    - name: Deploy container(s) from ECR (include per-image tasks)
       when: ecr_images | length > 0
       ansible.builtin.include_tasks: "tasks/deploy_ecr_container.yml"
       loop: "{{ ecr_images }}"
@@ -169,4 +195,4 @@
 
     - name: Final message
       ansible.builtin.debug:
-        msg: "EC2 configuration finished."
+        msg: "EC2 configuration finished. Check docker ps / systemctl for containers."

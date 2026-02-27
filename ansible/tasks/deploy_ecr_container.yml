@@ -1,28 +1,26 @@
 ---
-# Deploy ECR container per item in tools_to_install
-# Loop variable: ecr
+# Runs once per ecr image (loop variable is `ecr`)
 
 - name: Determine image repository and tag
   set_fact:
-    img_repo: "{{ ecr.ecr_repo_url | default('') }}"
+    img_repo: "{{ ecr.ecr_repo_url | default(ecr.image | default('')) }}"
     img_tag: "{{ ecr.image_tag | default('latest') }}"
 
 - name: Determine container name and run args
   set_fact:
     container_name: >-
-      {{ ecr.name if 'name' in ecr else
-         (img_repo.split('/')[-1] if img_repo != '' else 'container') }}
+      {{ ecr.name if ('name' in ecr) else (img_repo.split('/')[-1] if img_repo else 'container') }}
     run_args: "{{ ecr.run_args | default('-d --restart always --net host') }}"
     svc_name: "container-{{ container_name }}"
 
 - name: Debug chosen image vars
   ansible.builtin.debug:
     msg:
-      - "Repository: {{ img_repo }}"
-      - "Tag: {{ img_tag }}"
-      - "Container: {{ container_name }}"
-      - "Run args: {{ run_args }}"
-      - "Service name: {{ svc_name }}"
+      - "img_repo={{ img_repo }}"
+      - "img_tag={{ img_tag }}"
+      - "container_name={{ container_name }}"
+      - "run_args={{ run_args }}"
+      - "svc_name={{ svc_name }}"
 
 - name: Login to ECR
   ansible.builtin.shell: |
@@ -30,15 +28,15 @@
     aws ecr get-login-password --region {{ lookup('env','AWS_DEFAULT_REGION') | default('eu-central-1') }} \
       | docker login --username AWS --password-stdin {{ (img_repo.split('/'))[0] }}
   register: ecr_login
+  failed_when: ecr_login.rc != 0
   changed_when: "'Login Succeeded' in ecr_login.stdout or ecr_login.rc == 0"
-  failed_when: ecr_login.rc != 0 and ('Login Succeeded' not in ecr_login.stdout)
 
 - name: Pull image from ECR
   ansible.builtin.shell: |
     docker pull {{ img_repo }}:{{ img_tag }}
   register: pull_out
-  changed_when: "'Downloaded newer image' in pull_out.stdout or pull_out.rc == 0 or 'Image is up to date' in pull_out.stdout"
-  failed_when: pull_out.rc != 0 and ('Downloaded newer image' not in pull_out.stdout and 'Image is up to date' not in pull_out.stdout)
+  failed_when: pull_out.rc != 0
+  changed_when: "'Downloaded newer image' in pull_out.stdout or 'Image is up to date' in pull_out.stdout or pull_out.rc == 0"
 
 - name: Create systemd unit file from template
   ansible.builtin.template:
