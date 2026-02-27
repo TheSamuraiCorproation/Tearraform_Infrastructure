@@ -9,7 +9,7 @@
 
 - name: Determine container name and run args
   set_fact:
-    container_name: "{{ ecr.name | default((img_repo.split('/')[-1]) | default('container')) }}"
+    container_name: "{{ ecr.name | default(img_repo.split('/')[-1] if img_repo else 'container') }}"
     run_args: "{{ ecr.run_args | default('-d --restart always --net host') }}"
     svc_name: "container-{{ container_name }}"
 
@@ -22,10 +22,10 @@
       - "run_args={{ run_args }}"
       - "svc_name={{ svc_name }}"
 
-- name: Login to ECR (use /usr/local/bin/aws to be explicit)
+- name: Login to ECR (explicit path to AWS CLI)
   ansible.builtin.shell: |
     /usr/local/bin/aws ecr get-login-password --region {{ lookup('env','AWS_DEFAULT_REGION') | default('eu-central-1') }} \
-      | docker login --username AWS --password-stdin {{ (img_repo.split('/'))[0] }}
+      | docker login --username AWS --password-stdin {{ (img_repo.split('/')[0]) }}
   register: ecr_login
   failed_when: ecr_login.rc != 0
   changed_when: "'Login Succeeded' in ecr_login.stdout or ecr_login.rc == 0"
