@@ -1,58 +1,32 @@
 ---
-# Runs once per ecr image (loop variable is `ecr`)
-
-- name: Determine image repository and tag
-  set_fact:
-    img_repo: "{{ ecr.ecr_repo_url | default(ecr.image | default('')) }}"
-    img_tag: "{{ ecr.image_tag | default('latest') }}"
+# File: deploy_ecr_container.yml
+# Purpose: Deploy containers from ECR images on EC2 instances (included by install_tools.yml)
 
 - name: Determine container name and run args
   set_fact:
-    container_name: >-
-      {{ ecr.name if ('name' in ecr) else (img_repo.split('/')[-1] if img_repo else 'container') }}
-    run_args: "{{ ecr.run_args | default('-d --restart always --net host') }}"
-    svc_name: "container-{{ container_name }}"
+    container_name: "{{ ecr.name | default(ecr.ecr_repo_url.split('/')[-1]) }}"
+    run_args: "{{ ecr.run_args | default('-d --restart always') }}"
+    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+  become: yes
 
-- name: Debug chosen image vars
-  ansible.builtin.debug:
-    msg:
-      - "img_repo={{ img_repo }}"
-      - "img_tag={{ img_tag }}"
-      - "container_name={{ container_name }}"
-      - "run_args={{ run_args }}"
-      - "svc_name={{ svc_name }}"
+- name: Authenticate Docker to ECR
+  amazon.aws.aws_ecr:
+    registry_ids: "{{ image_full.split('.')[0] }}"
+    state: login
+  become: yes
 
-- name: Login to ECR
-  ansible.builtin.shell: |
-    export PATH=/usr/local/bin:$PATH
-    aws ecr get-login-password --region {{ lookup('env','AWS_DEFAULT_REGION') | default('eu-central-1') }} \
-      | docker login --username AWS --password-stdin {{ (img_repo.split('/'))[0] }}
-  register: ecr_login
-  failed_when: ecr_login.rc != 0
-  changed_when: "'Login Succeeded' in ecr_login.stdout or ecr_login.rc == 0"
+- name: Pull the ECR image
+  community.docker.docker_image:
+    name: "{{ image_full }}"
+    source: pull
+  become: yes
 
-- name: Pull image from ECR
-  ansible.builtin.shell: |
-    docker pull {{ img_repo }}:{{ img_tag }}
-  register: pull_out
-  failed_when: pull_out.rc != 0
-  changed_when: "'Downloaded newer image' in pull_out.stdout or 'Image is up to date' in pull_out.stdout or pull_out.rc == 0"
-
-- name: Create systemd unit file from template
-  ansible.builtin.template:
-    src: "templates/ecr-container.service.j2"
-    dest: "/etc/systemd/system/{{ svc_name }}.service"
-    owner: root
-    group: root
-    mode: '0644'
-  vars:
-    container_name: "{{ container_name }}"
-    image_full: "{{ img_repo }}:{{ img_tag }}"
-    run_args: "{{ run_args }}"
-
-- name: Reload systemd and enable service
-  ansible.builtin.systemd:
-    name: "{{ svc_name }}"
-    enabled: yes
-    state: restarted
-    daemon_reload: yes
+- name: Run container
+  community.docker.docker_container:
+    name: "{{ container_name }}"
+    image: "{{ image_full }}"
+    state: started
+    restart_policy: unless-stopped
+    recreate: yes
+    command: "{{ run_args }}"
+  become: yes
