@@ -1,32 +1,39 @@
 ---
-# File: deploy_ecr_container.yml
-# Purpose: Deploy containers from ECR images on EC2 instances (included by install_tools.yml)
+# File: ansible/tasks/deploy_ecr_container.yml
+# Purpose: Deploy container from AWS ECR without amazon.aws collection
 
-- name: Determine container name and run args
+- name: Set image variables
   set_fact:
     container_name: "{{ ecr.name | default(ecr.ecr_repo_url.split('/')[-1]) }}"
-    run_args: "{{ ecr.run_args | default('-d --restart always') }}"
     image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    aws_region: "{{ ecr.ecr_repo_url.split('.')[3] }}"
+    aws_registry: "{{ ecr.ecr_repo_url.split('/')[0] }}"
   become: yes
 
-- name: Authenticate Docker to ECR
-  amazon.aws.aws_ecr:
-    registry_ids: "{{ image_full.split('.')[0] }}"
-    state: login
+- name: Login to ECR using AWS CLI
+  shell: |
+    aws ecr get-login-password --region {{ aws_region }} \
+    | docker login --username AWS --password-stdin {{ aws_registry }}
+  args:
+    executable: /bin/bash
   become: yes
 
-- name: Pull the ECR image
+- name: Pull Docker image from ECR
   community.docker.docker_image:
     name: "{{ image_full }}"
     source: pull
   become: yes
 
-- name: Run container
+- name: Remove existing container if present
   community.docker.docker_container:
     name: "{{ container_name }}"
-    image: "{{ image_full }}"
-    state: started
-    restart_policy: unless-stopped
-    recreate: yes
-    command: "{{ run_args }}"
+    state: absent
+  ignore_errors: yes
+  become: yes
+
+- name: Run Docker container
+  shell: |
+    docker run -d --name {{ container_name }} {{ ecr.run_args | default('') }} {{ image_full }}
+  args:
+    executable: /bin/bash
   become: yes
