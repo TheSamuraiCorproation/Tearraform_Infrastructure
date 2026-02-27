@@ -5,11 +5,9 @@
 
   vars:
     tools_to_install: []
-    aws_region: eu-central-1
     cloudwatch_agent_deb_url: "https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_local: "/tmp/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_conf_dest: "/etc/amazon-cloudwatch-agent.json"
-
     docker_packages:
       - apt-transport-https
       - ca-certificates
@@ -21,201 +19,154 @@
       - unzip
 
   tasks:
+    - name: Gather facts
+      ansible.builtin.setup:
 
-  - name: Gather facts
-    ansible.builtin.setup:
+    - name: Show tools to install
+      ansible.builtin.debug:
+        msg: "Tools requested: {{ tools_to_install | default([]) }}"
 
-  ###########################################################################
-  # DEBUG INPUT
-  ###########################################################################
-  - name: Show tools to install
-    ansible.builtin.debug:
-      msg: "Tools requested: {{ tools_to_install | default([]) }}"
+    - name: Ensure apt cache is up to date
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
 
-  ###########################################################################
-  # APT PREP
-  ###########################################################################
-  - name: Ensure apt cache is up to date
-    ansible.builtin.apt:
-      update_cache: yes
-      cache_valid_time: 3600
+    - name: Install base utilities
+      ansible.builtin.apt:
+        name:
+          - wget
+          - curl
+          - jq
+          - ca-certificates
+          - apt-transport-https
+          - lsb-release
+          - gnupg
+        state: present
 
-  - name: Install base utilities
-    ansible.builtin.apt:
-      name:
-        - wget
-        - curl
-        - jq
-        - unzip
-        - ca-certificates
-        - apt-transport-https
-        - lsb-release
-        - gnupg
-      state: present
+    # --- CloudWatch agent ---
+    - name: Check if CloudWatch agent binary exists
+      ansible.builtin.stat:
+        path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+      register: cw_agent_bin
 
-  ###########################################################################
-  # CLOUDWATCH AGENT
-  ###########################################################################
-  - name: Check if CloudWatch agent binary exists
-    ansible.builtin.stat:
-      path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
-    register: cw_agent_bin
+    - name: Download amazon-cloudwatch-agent.deb (only if not present)
+      ansible.builtin.get_url:
+        url: "{{ cloudwatch_agent_deb_url }}"
+        dest: "{{ cloudwatch_agent_local }}"
+        mode: "0644"
+      when: not cw_agent_bin.stat.exists
 
-  - name: Download amazon-cloudwatch-agent.deb (only if not present)
-    ansible.builtin.get_url:
-      url: "{{ cloudwatch_agent_deb_url }}"
-      dest: "{{ cloudwatch_agent_local }}"
-      mode: "0644"
-    when: not cw_agent_bin.stat.exists
+    - name: Install amazon-cloudwatch-agent (dpkg)
+      ansible.builtin.command:
+        cmd: "dpkg -i {{ cloudwatch_agent_local }}"
+      register: dpkg_res
+      changed_when: dpkg_res.rc == 0
+      failed_when: dpkg_res.rc not in [0,1]
+      when: not cw_agent_bin.stat.exists
+      ignore_errors: true
 
-  - name: Install amazon-cloudwatch-agent (dpkg)
-    ansible.builtin.command:
-      cmd: "dpkg -i {{ cloudwatch_agent_local }}"
-    register: dpkg_res
-    changed_when: dpkg_res.rc == 0
-    failed_when: dpkg_res.rc not in [0,1]
-    when: not cw_agent_bin.stat.exists
-    ignore_errors: true
+    - name: Fix missing deps after dpkg
+      ansible.builtin.command:
+        cmd: apt-get -f -y install
+      register: apt_fix
+      changed_when: "'Setting up' in apt_fix.stdout or apt_fix.rc == 0"
 
-  - name: Fix missing deps after dpkg (apt-get -f install)
-    ansible.builtin.command:
-      cmd: apt-get -f -y install
-    register: apt_fix
-    changed_when: "'Setting up' in apt_fix.stdout or apt_fix.rc == 0"
+    - name: Verify cloudwatch agent installed
+      ansible.builtin.stat:
+        path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+      register: cw_agent_installed
 
-  - name: Verify cloudwatch agent installed (stat again)
-    ansible.builtin.stat:
-      path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
-    register: cw_agent_installed
+    - name: Fail early if agent not installed
+      ansible.builtin.fail:
+        msg: "CloudWatch agent installation failed or binary missing."
+      when: not cw_agent_installed.stat.exists
 
-  - name: Fail early if agent not installed
-    ansible.builtin.fail:
-      msg: "CloudWatch agent installation failed or binary missing. See previous logs."
-    when: not cw_agent_installed.stat.exists
+    - name: Deploy CloudWatch agent configuration from template
+      ansible.builtin.template:
+        src: "amazon-cloudwatch-agent.j2"
+        dest: "{{ cloudwatch_agent_conf_dest }}"
+        owner: root
+        group: root
+        mode: '0644'
 
-  - name: Deploy CloudWatch agent configuration from template
-    ansible.builtin.template:
-      src: "amazon-cloudwatch-agent.j2"
-      dest: "{{ cloudwatch_agent_conf_dest }}"
-      owner: root
-      group: root
-      mode: '0644'
+    - name: Start/Restart CloudWatch agent
+      ansible.builtin.command:
+        cmd: "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop || true; /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a start -m ec2 -c file:{{ cloudwatch_agent_conf_dest }}"
+      register: cw_ctl
+      changed_when: "'started' in cw_ctl.stdout.lower() or cw_ctl.rc == 0"
 
-  - name: Start/Restart CloudWatch agent with the config
-    ansible.builtin.command:
-      cmd: "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop || true; /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a start -m ec2 -c file:{{ cloudwatch_agent_conf_dest }}"
-    register: cw_ctl
-    changed_when: "'started' in cw_ctl.stdout.lower() or cw_ctl.rc == 0"
+    - name: Wait for CloudWatch agent to show running
+      ansible.builtin.command:
+        cmd: "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -m ec2 -a status"
+      register: cw_status
+      retries: 5
+      delay: 6
+      until: cw_status.stdout is search("running") or cw_status.rc == 0
+      failed_when: cw_status.rc != 0 and ('running' not in cw_status.stdout.lower())
 
-  - name: Wait for CloudWatch agent to show running
-    ansible.builtin.command:
-      cmd: "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -m ec2 -a status"
-    register: cw_status
-    retries: 5
-    delay: 6
-    until: cw_status.stdout is search("running") or cw_status.rc == 0
-    failed_when: cw_status.rc != 0 and ('running' not in cw_status.stdout.lower())
+    - name: Show CloudWatch agent status
+      ansible.builtin.debug:
+        msg: "{{ cw_status.stdout | default('no status output') }}"
 
-  - name: Show CloudWatch agent status (debug)
-    ansible.builtin.debug:
-      msg: "{{ cw_status.stdout | default('no status output') }}"
+    # --- Docker & AWS CLI ---
+    - name: Ensure docker + dependencies present if any ECR images requested
+      when: (tools_to_install | select('is mapping') | list) | length > 0
+      block:
+        - name: Install docker and extras
+          ansible.builtin.apt:
+            name: "{{ docker_packages }}"
+            state: present
+            update_cache: yes
 
-  ###########################################################################
-  # DOCKER + DEPENDENCIES
-  ###########################################################################
-  - name: Install docker and extras
-    ansible.builtin.apt:
-      name: "{{ docker_packages }}"
-      state: present
-      update_cache: yes
+        - name: Ensure docker service is started
+          ansible.builtin.service:
+            name: docker
+            state: started
+            enabled: yes
 
-  - name: Ensure docker service is started
-    ansible.builtin.service:
-      name: docker
-      state: started
-      enabled: yes
+        - name: Ensure pip3 is present
+          ansible.builtin.apt:
+            name: python3-pip
+            state: present
 
-  ###########################################################################
-  # AWS CLI v2 installation (so `aws ecr get-login-password` exists)
-  # We'll install AWS CLI v2 only if /usr/local/bin/aws is missing.
-  ###########################################################################
-  - name: Install unzip (for AWS CLI installer)
-    ansible.builtin.apt:
-      name: unzip
-      state: present
+        - name: Install AWS CLI v2 (if not present)
+          ansible.builtin.shell: |
+            if ! command -v aws >/dev/null 2>&1; then
+              tmpdir=$(mktemp -d)
+              cd $tmpdir
+              curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+              unzip awscliv2.zip
+              sudo ./aws/install -i /usr/local/aws-cli -b /usr/local/bin || true
+            fi
+          args:
+            creates: /usr/local/bin/aws
 
-  - name: Install AWS CLI v2 (installer) if missing
-    ansible.builtin.shell: |
-      set -eux
-      tmpdir=$(mktemp -d)
-      cd "$tmpdir"
-      curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-      unzip -q awscliv2.zip
-      sudo ./aws/install --update -i /usr/local/aws-cli -b /usr/local/bin || true
-    args:
-      creates: /usr/local/bin/aws
+        - name: Ensure /usr/local/bin is in PATH for this play
+          ansible.builtin.shell: |
+            export PATH=/usr/local/bin:$PATH
 
-  - name: Verify aws cli present
-    ansible.builtin.command:
-      cmd: /usr/local/bin/aws --version
-    register: aws_ver
-    changed_when: false
+    # --- Classify tools ---
+    - name: Collect apt-only packages
+      set_fact:
+        apt_packages: "{{ (tools_to_install | default([]) ) | select('is string') | list }}"
 
-  - name: Add /usr/local/bin to PATH for subsequent shell tasks (idempotent)
-    ansible.builtin.lineinfile:
-      path: /etc/profile.d/aws_path.sh
-      line: 'export PATH=/usr/local/bin:$PATH'
-      create: yes
-      state: present
+    - name: Collect ecr images
+      set_fact:
+        ecr_images: "{{ (tools_to_install | default([]) ) | select('is mapping') | list }}"
 
-  ###########################################################################
-  # SAFE TOOL CLASSIFICATION
-  ###########################################################################
-  - name: Initialize tool lists
-    ansible.builtin.set_fact:
-      apt_packages: []
-      ecr_images: []
+    - name: Install apt packages requested
+      ansible.builtin.apt:
+        name: "{{ apt_packages }}"
+        state: present
+      when: apt_packages | length > 0
 
-  - name: Classify APT packages (strings)
-    ansible.builtin.set_fact:
-      apt_packages: "{{ apt_packages + [item] }}"
-    when: item is string
-    loop: "{{ tools_to_install | default([]) }}"
+    - name: Deploy container(s) from ECR
+      when: ecr_images | length > 0
+      ansible.builtin.include_tasks: "tasks/deploy_ecr_container.yml"
+      loop: "{{ ecr_images }}"
+      loop_control:
+        loop_var: ecr
 
-  - name: Classify ECR images (dicts)
-    ansible.builtin.set_fact:
-      ecr_images: "{{ ecr_images + [item] }}"
-    when: item is mapping
-    loop: "{{ tools_to_install | default([]) }}"
-
-  - name: Debug classified tools
-    ansible.builtin.debug:
-      msg:
-        - "APT packages: {{ apt_packages }}"
-        - "ECR images: {{ ecr_images }}"
-
-  ###########################################################################
-  # INSTALL APT PACKAGES
-  ###########################################################################
-  - name: Install apt packages requested (if any)
-    ansible.builtin.apt:
-      name: "{{ apt_packages }}"
-      state: present
-    when: apt_packages | length > 0
-
-  ###########################################################################
-  # DEPLOY ECR CONTAINERS (includes per-image tasks)
-  ###########################################################################
-  - name: Deploy container(s) from ECR
-    when: ecr_images | length > 0
-    ansible.builtin.include_tasks: "tasks/deploy_ecr_container.yml"
-    loop: "{{ ecr_images }}"
-    loop_control:
-      loop_var: ecr
-
-  ###########################################################################
-  - name: Final message
-    ansible.builtin.debug:
-      msg: |
-        EC2 configuration finished.
-        If any containers were requested they should be running (check 'docker ps' or 'systemctl status').
+    - name: Final message
+      ansible.builtin.debug:
+        msg: "EC2 configuration finished."
