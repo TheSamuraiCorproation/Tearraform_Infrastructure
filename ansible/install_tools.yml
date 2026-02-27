@@ -43,7 +43,7 @@
         - gnupg
       state: present
 
-  # --- CloudWatch agent install (unchanged from your file) ---
+  # --- CloudWatch agent install ---
   - name: Check if CloudWatch agent binary exists
     ansible.builtin.stat:
       path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
@@ -108,7 +108,7 @@
     ansible.builtin.debug:
       msg: "{{ cw_status.stdout | default('no status output') }}"
 
-  # --- New: split incoming tools into apt packages and ECR images ---
+  # --- Docker & ECR tools ---
   - name: Ensure docker + dependencies present (if any mapped images requested)
     when: (tools_to_install | select('is mapping') | list) | length > 0
     block:
@@ -155,50 +155,13 @@
       state: present
     when: apt_packages | length > 0
 
-  # --- For each ECR image, log in, pull and create a systemd service to run it ---
+  # --- ECR containers ---
   - name: Deploy container(s) from ECR
     when: ecr_images | length > 0
+    ansible.builtin.include_tasks: "tasks/deploy_ecr_container.yml"
     loop: "{{ ecr_images }}"
     loop_control:
       loop_var: ecr
-    vars:
-      img_repo: "{{ ecr.ecr_repo_url | default(ecr.image | default('')) }}"
-      img_tag: "{{ ecr.image_tag | default('latest') }}"
-      name: "{{ ecr.name | default(img_repo.split('/')[-1] | default('container')) }}"
-      run_args: "{{ ecr.run_args | default('-d --restart always --net host') }}"
-      svc_name: "container-{{ name }}"
-    block:
-      - name: Login to ECR
-        ansible.builtin.shell: |
-          aws ecr get-login-password --region {{ lookup('env','AWS_DEFAULT_REGION') | default('eu-central-1') }} \
-            | docker login --username AWS --password-stdin {{ (img_repo.split('/'))[0] }}
-        register: ecr_login
-        changed_when: "'Login Succeeded' in ecr_login.stdout or ecr_login.rc == 0"
-
-      - name: Pull image from ECR
-        ansible.builtin.shell: |
-          docker pull {{ img_repo }}:{{ img_tag }}
-        register: pull_out
-        changed_when: "'Downloaded newer image' in pull_out.stdout or pull_out.rc == 0 or 'Image is up to date' in pull_out.stdout"
-
-      - name: Create systemd unit file from template
-        ansible.builtin.template:
-          src: "templates/ecr-container.service.j2"
-          dest: "/etc/systemd/system/{{ svc_name }}.service"
-          owner: root
-          group: root
-          mode: '0644'
-        vars:
-          container_name: "{{ name }}"
-          image_full: "{{ img_repo }}:{{ img_tag }}"
-          run_args: "{{ run_args }}"
-
-      - name: Reload systemd and enable service
-        ansible.builtin.systemd:
-          name: "{{ svc_name }}"
-          enabled: yes
-          state: restarted
-          daemon_reload: yes
 
   - name: Final message
     ansible.builtin.debug:
