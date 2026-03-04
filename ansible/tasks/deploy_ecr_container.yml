@@ -8,17 +8,17 @@
   set_fact:
     dedicated_task_path: "{{ playbook_dir }}/tasks/deploy_{{ ecr.name | lower }}.yml"
 
-- name: Check if dedicated deploy task exists on controller
+- name: Check if dedicated deploy task exists on controller (no sudo)
   ansible.builtin.stat:
     path: "{{ dedicated_task_path }}"
   delegate_to: localhost
+  become: false
   run_once: true
   register: dedicated_task_stat
 
 - name: Include dedicated deploy task (if it exists)
   ansible.builtin.include_tasks: "{{ 'tasks/deploy_' + (ecr.name | lower) + '.yml' }}"
   when: dedicated_task_stat.stat.exists
-  # include_tasks will be evaluated on controller and executed on remote host
 
 - name: Generic ECR deploy (fallback) - login, pull, run
   when: not dedicated_task_stat.stat.exists
@@ -37,14 +37,18 @@
       args:
         warn: false
 
-    - name: Login to ECR (use /usr/local/bin/aws if available)
+    - name: Login to ECR (use /usr/local/bin/aws if present)
       vars:
-        aws_cli: "{{ '/usr/local/bin/aws' if lookup('fileglob','/usr/local/bin/aws', errors='ignore') else 'aws' }}"
         registry: "{{ ecr.ecr_repo_url.split('/')[0] }}"
       ansible.builtin.shell: |
         set -eux
-        {{ aws_cli }} ecr get-login-password --region {{ aws_region }} \
-          | docker login --username AWS --password-stdin {{ registry }}
+        if [ -x /usr/local/bin/aws ]; then
+          /usr/local/bin/aws ecr get-login-password --region {{ aws_region }} \
+            | docker login --username AWS --password-stdin {{ registry }}
+        else
+          aws ecr get-login-password --region {{ aws_region }} \
+            | docker login --username AWS --password-stdin {{ registry }}
+        fi
       args:
         warn: false
 
@@ -58,7 +62,7 @@
     - name: Run container (generic)
       ansible.builtin.shell: |
         set -eux
-        # run_args is expected to include any -p, -v, --cap-add, etc. We append the image name last.
+        # run_args is expected to include -p, -v, --cap-add, etc.
         docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
       args:
         warn: false
