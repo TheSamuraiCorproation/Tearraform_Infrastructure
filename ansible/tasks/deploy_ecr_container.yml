@@ -1,39 +1,64 @@
 ---
-# File: ansible/tasks/deploy_ecr_container.yml
-# Purpose: Deploy container from AWS ECR without amazon.aws collection
+# Deploy one ECR item (loop var is `ecr`)
+# Behaviour:
+# 1) If a dedicated task file exists at <playbook_dir>/tasks/deploy_<name>.yml then include it.
+# 2) Otherwise do a generic docker pull + docker run using any provided run_args.
 
-- name: Set image variables
+- name: Set dedicated task filename (controller path)
   set_fact:
-    container_name: "{{ ecr.name | default(ecr.ecr_repo_url.split('/')[-1]) }}"
-    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-    aws_region: "{{ ecr.ecr_repo_url.split('.')[3] }}"
-    aws_registry: "{{ ecr.ecr_repo_url.split('/')[0] }}"
-  become: yes
+    dedicated_task_path: "{{ playbook_dir }}/tasks/deploy_{{ ecr.name | lower }}.yml"
 
-- name: Login to ECR using AWS CLI
-  shell: |
-    aws ecr get-login-password --region {{ aws_region }} \
-    | docker login --username AWS --password-stdin {{ aws_registry }}
-  args:
-    executable: /bin/bash
-  become: yes
+- name: Check if dedicated deploy task exists on controller
+  ansible.builtin.stat:
+    path: "{{ dedicated_task_path }}"
+  delegate_to: localhost
+  run_once: true
+  register: dedicated_task_stat
 
-- name: Pull Docker image from ECR
-  community.docker.docker_image:
-    name: "{{ image_full }}"
-    source: pull
-  become: yes
+- name: Include dedicated deploy task (if it exists)
+  ansible.builtin.include_tasks: "{{ 'tasks/deploy_' + (ecr.name | lower) + '.yml' }}"
+  when: dedicated_task_stat.stat.exists
+  # include_tasks will be evaluated on controller and executed on remote host
 
-- name: Remove existing container if present
-  community.docker.docker_container:
-    name: "{{ container_name }}"
-    state: absent
-  ignore_errors: yes
-  become: yes
+- name: Generic ECR deploy (fallback) - login, pull, run
+  when: not dedicated_task_stat.stat.exists
+  block:
+    - name: Compute image and run args
+      set_fact:
+        image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+        container_name: "{{ (ecr.name | default((ecr.ecr_repo_url.split('/')[-1]))) | lower }}"
+        run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
 
-- name: Run Docker container
-  shell: |
-    docker run -d --name {{ container_name }} {{ ecr.run_args | default('') }} {{ image_full }}
-  args:
-    executable: /bin/bash
-  become: yes
+    - name: Ensure old container removed (if present)
+      ansible.builtin.shell: |
+        if docker ps -a --format '{{'{{'}}.Names{{'}}'}}' | grep -xq '{{ container_name }}'; then
+          docker rm -f {{ container_name }} || true
+        fi
+      args:
+        warn: false
+
+    - name: Login to ECR (use /usr/local/bin/aws if available)
+      vars:
+        aws_cli: "{{ '/usr/local/bin/aws' if lookup('fileglob','/usr/local/bin/aws', errors='ignore') else 'aws' }}"
+        registry: "{{ ecr.ecr_repo_url.split('/')[0] }}"
+      ansible.builtin.shell: |
+        set -eux
+        {{ aws_cli }} ecr get-login-password --region {{ aws_region }} \
+          | docker login --username AWS --password-stdin {{ registry }}
+      args:
+        warn: false
+
+    - name: Pull image from ECR
+      ansible.builtin.shell: |
+        set -eux
+        docker pull {{ image_full }}
+      args:
+        warn: false
+
+    - name: Run container (generic)
+      ansible.builtin.shell: |
+        set -eux
+        # run_args is expected to include any -p, -v, --cap-add, etc. We append the image name last.
+        docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+      args:
+        warn: false

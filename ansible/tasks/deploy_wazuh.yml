@@ -1,0 +1,68 @@
+---
+# deploy_wazuh.yml — invoked when tools_to_install contains an object with "name": "wazuh"
+
+- name: Create Wazuh directory
+  ansible.builtin.file:
+    path: /opt/wazuh
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Prepare variables for compose
+  set_fact:
+    indexer_image: "{{ ecr.indexer_image | default('wazuh/wazuh-indexer:4.14.3') }}"
+    manager_image: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    dashboard_image: "{{ ecr.dashboard_image | default('wazuh/wazuh-dashboard:4.14.3') }}"
+
+- name: Render docker-compose for Wazuh
+  ansible.builtin.template:
+    src: ../templates/docker-compose.wazuh.j2
+    dest: /opt/wazuh/docker-compose.yml
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    indexer_image: "{{ indexer_image }}"
+    manager_image: "{{ manager_image }}"
+    dashboard_image: "{{ dashboard_image }}"
+
+- name: Ensure /opt/wazuh owned by root
+  ansible.builtin.file:
+    path: /opt/wazuh
+    owner: root
+    group: root
+    recurse: yes
+
+- name: Pull Wazuh images and start stack (try docker compose or docker-compose)
+  ansible.builtin.shell: |
+    set -eux
+    # ensure AWS CLI path (if installed to /usr/local/bin)
+    if [ -x /usr/local/bin/aws ]; then
+      export PATH="/usr/local/bin:$PATH"
+    fi
+
+    # prefer `docker compose` (v2), fallback to `docker-compose`
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+      COMPOSE="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+      COMPOSE="docker-compose"
+    else
+      echo "ERROR: no docker compose available (install docker compose plugin or docker-compose)" >&2
+      exit 2
+    fi
+
+    # If ECR manager image is in ECR, ensure login before pull (if registry looks like an AWS ECR URI)
+    if echo "{{ manager_image }}" | grep -E '^[0-9]+\\.dkr\\.ecr\\.' >/dev/null 2>&1; then
+      REGISTRY=$(echo "{{ manager_image }}" | cut -d'/' -f1)
+      if command -v /usr/local/bin/aws >/dev/null 2>&1; then
+        /usr/local/bin/aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin ${REGISTRY}
+      else
+        aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin ${REGISTRY}
+      fi
+    fi
+
+    ${COMPOSE} -f /opt/wazuh/docker-compose.yml pull
+    ${COMPOSE} -f /opt/wazuh/docker-compose.yml up -d
+  args:
+    warn: false

@@ -46,7 +46,7 @@
         state: present
 
     ########################################################################
-    # CloudWatch agent (unchanged)
+    # CloudWatch agent
     ########################################################################
     - name: Check if CloudWatch agent binary exists
       ansible.builtin.stat:
@@ -111,7 +111,7 @@
         msg: "{{ cw_status.stdout | default('no status output') }}"
 
     ########################################################################
-    # SAFE CLASSIFICATION (no select('is mapping') / no select('is string'))
+    # CLASSIFY TOOLS
     ########################################################################
     - name: Initialize tool lists
       ansible.builtin.set_fact:
@@ -146,7 +146,7 @@
       when: apt_packages | length > 0
 
     ########################################################################
-    # If there are ECR images, install Docker + AWS CLI then deploy containers
+    # Docker/ECR tools
     ########################################################################
     - name: Install docker and extras (if ECR images requested)
       when: ecr_images | length > 0
@@ -163,7 +163,7 @@
             state: started
             enabled: yes
 
-        - name: Ensure unzip present (aws cli installer)
+        - name: Ensure unzip present (AWS CLI installer)
           ansible.builtin.apt:
             name: unzip
             state: present
