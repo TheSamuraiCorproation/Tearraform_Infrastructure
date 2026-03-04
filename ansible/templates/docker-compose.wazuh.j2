@@ -1,0 +1,52 @@
+version: '3.9'
+
+services:
+
+  wazuh-indexer:
+    image: "{{ indexer_image }}"
+    container_name: wazuh-indexer
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - wazuh-indexer-data:/usr/share/elasticsearch/data
+
+  wazuh-manager:
+    image: "{{ manager_image }}"
+    container_name: wazuh-manager
+    restart: unless-stopped
+    depends_on:
+      - wazuh-indexer
+    ports:
+      - "1514:1514/udp"
+      - "1515:1515"
+      - "55000:55000"
+    volumes:
+      - wazuh-manager-data:/var/ossec/data_tmp/permanent
+      - wazuh-rules:/var/ossec/etc/rules
+
+  wazuh-dashboard:
+    image: "{{ dashboard_image }}"
+    container_name: wazuh-dashboard
+    restart: unless-stopped
+    depends_on:
+      - wazuh-indexer
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=https://wazuh-indexer:9200
+    volumes:
+      - wazuh-dashboard-data:/usr/share/kibana/data
+
+volumes:
+  wazuh-indexer-data:
+  wazuh-manager-data:
+  wazuh-rules:
+  wazuh-dashboard-data:

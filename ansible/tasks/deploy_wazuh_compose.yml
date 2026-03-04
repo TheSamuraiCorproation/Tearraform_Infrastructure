@@ -1,0 +1,71 @@
+---
+# Deploy a 3-node Wazuh stack (indexer, manager, dashboard) using docker compose.
+# Expects `wazuh_images` fact to exist and take the first item as the manager image entry.
+
+- name: Select first wazuh image entry
+  set_fact:
+    wazuh_entry: "{{ (wazuh_images | default([]))[0] }}"
+
+- name: Compute images for compose
+  set_fact:
+    manager_image: >-
+      {{ (wazuh_entry.ecr_repo_url | default('')) | ternary(wazuh_entry.ecr_repo_url ~ ':' ~ (wazuh_entry.image_tag | default('latest')), (wazuh_entry.manager_image | default('nasrimohamedhedi/wazuh-manager:latest'))) }}
+    indexer_image: "{{ wazuh_entry.indexer_image | default('wazuh/wazuh-indexer:4.14.3') }}"
+    dashboard_image: "{{ wazuh_entry.dashboard_image | default('wazuh/wazuh-dashboard:4.14.3') }}"
+  vars:
+    # safe default fallback if ecr_repo_url is empty
+    # (manager_image will be ecr_uri:tag if ecr_repo_url present, otherwise use manager_image or dockerhub name)
+    manager_image: ""
+
+- name: Create /opt/wazuh directory
+  ansible.builtin.file:
+    path: /opt/wazuh
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: yes
+
+- name: Render docker-compose for Wazuh (template)
+  ansible.builtin.template:
+    src: "../templates/docker-compose.wazuh.j2"
+    dest: /opt/wazuh/docker-compose.yml
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    manager_image: "{{ manager_image }}"
+    indexer_image: "{{ indexer_image }}"
+    dashboard_image: "{{ dashboard_image }}"
+  become: yes
+
+- name: Login to ECR (if manager_image is from ECR)
+  ansible.builtin.shell: |
+    set -eux
+    # extract registry host (first token before slash)
+    REG="{{ manager_image.split('/')[0] }}"
+    if [[ "${REG}" =~ [0-9]+\.[a-z0-9-]+\.ecr\.[a-z0-9-]+\.amazonaws\.com ]]; then
+      aws ecr get-login-password --region {{ aws_region | default('eu-central-1') }} \
+        | docker login --username AWS --password-stdin ${REG}
+    fi
+  args:
+    executable: /bin/bash
+  become: yes
+
+- name: Pull & start wazuh stack (docker compose)
+  ansible.builtin.shell: |
+    set -eux
+    cd /opt/wazuh
+    docker compose pull || true
+    docker compose up -d
+  args:
+    executable: /bin/bash
+  become: yes
+
+- name: Wait for indexer to be healthy (simple wait)
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 9200
+    delay: 10
+    timeout: 120
+  become: yes
