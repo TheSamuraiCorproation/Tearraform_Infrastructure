@@ -1,68 +1,66 @@
 ---
-# Deploy one ECR item (loop var is `ecr`)
-# Behaviour:
-# 1) If a dedicated task file exists at <playbook_dir>/tasks/deploy_<name>.yml then include it.
-# 2) Otherwise do a generic docker pull + docker run using any provided run_args.
+# File: ansible/tasks/deploy_ecr_container.yml
+# Called by ansible/install_tools.yml for each ecr mapping (loop var = `ecr`)
 
-- name: Set dedicated task filename (controller path)
-  set_fact:
-    dedicated_task_path: "{{ playbook_dir }}/tasks/deploy_{{ ecr.name | lower }}.yml"
+- name: Compose dedicated task filename
+  ansible.builtin.set_fact:
+    dedicated_task_rel: "tasks/deploy_{{ ecr.name | lower }}.yml"
+    dedicated_task_basename: "deploy_{{ ecr.name | lower }}.yml"
 
-- name: Check if dedicated deploy task exists on controller (no sudo)
+# Check if dedicated deploy task exists on the controller (playbook host)
+- name: Check if dedicated deploy task exists on controller
   ansible.builtin.stat:
-    path: "{{ dedicated_task_path }}"
+    path: "{{ playbook_dir | default('.') }}/{{ dedicated_task_rel }}"
   delegate_to: localhost
-  become: false
   run_once: true
-  register: dedicated_task_stat
+  register: dedicated_task_exists
 
-- name: Include dedicated deploy task (if it exists)
-  ansible.builtin.include_tasks: "{{ 'tasks/deploy_' + (ecr.name | lower) + '.yml' }}"
-  when: dedicated_task_stat.stat.exists
+- name: Include dedicated deploy task if present
+  ansible.builtin.include_tasks: "{{ dedicated_task_rel }}"
+  when: dedicated_task_exists.stat.exists
 
-- name: Generic ECR deploy (fallback) - login, pull, run
-  when: not dedicated_task_stat.stat.exists
-  block:
-    - name: Compute image and run args
-      set_fact:
-        image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-        container_name: "{{ (ecr.name | default((ecr.ecr_repo_url.split('/')[-1]))) | lower }}"
-        run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
+# If there is no dedicated file, perform a generic docker pull + run
+- name: Generic: compute image & container variables
+  ansible.builtin.set_fact:
+    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    container_name: "{{ (ecr.name | lower).replace(' ', '-') }}"
+    # if run_args already contains -d (detached) leave as-is, otherwise add -d + restart policy
+    run_args_final: >-
+      {% set r = ecr.run_args | default('') %}
+      {% if '-d' in r or '--detach' in r %}
+        {{ r }}
+      {% else %}
+        -d --restart unless-stopped {{ r }}
+      {% endif %}
+  when: not dedicated_task_exists.stat.exists
 
-    - name: Ensure old container removed (if present)
-      ansible.builtin.shell: |
-        if docker ps -a --format '{{'{{'}}.Names{{'}}'}}' | grep -xq '{{ container_name }}'; then
-          docker rm -f {{ container_name }} || true
-        fi
-      args:
-        warn: false
+- name: Generic: ensure old container removed if present (ignore errors)
+  ansible.builtin.shell: |
+    docker rm -f {{ container_name }} || true
+  when: not dedicated_task_exists.stat.exists
 
-    - name: Login to ECR (use /usr/local/bin/aws if present)
-      vars:
-        registry: "{{ ecr.ecr_repo_url.split('/')[0] }}"
-      ansible.builtin.shell: |
-        set -eux
-        if [ -x /usr/local/bin/aws ]; then
-          /usr/local/bin/aws ecr get-login-password --region {{ aws_region }} \
-            | docker login --username AWS --password-stdin {{ registry }}
-        else
-          aws ecr get-login-password --region {{ aws_region }} \
-            | docker login --username AWS --password-stdin {{ registry }}
-        fi
-      args:
-        warn: false
+- name: Generic: login to ECR (uses AWS CLI on the target)
+  ansible.builtin.shell: |
+    set -eux
+    export AWS_DEFAULT_REGION={{ aws_region | default('eu-central-1') }}
+    aws ecr get-login-password --region $AWS_DEFAULT_REGION \
+      | docker login --username AWS --password-stdin {{ ecr.ecr_repo_url.split('/')[0] }}
+  args:
+    warn: false
+  when: not dedicated_task_exists.stat.exists
 
-    - name: Pull image from ECR
-      ansible.builtin.shell: |
-        set -eux
-        docker pull {{ image_full }}
-      args:
-        warn: false
+- name: Generic: pull image from ECR
+  ansible.builtin.shell: |
+    set -eux
+    docker pull {{ image_full }}
+  args:
+    warn: false
+  when: not dedicated_task_exists.stat.exists
 
-    - name: Run container (generic)
-      ansible.builtin.shell: |
-        set -eux
-        # run_args is expected to include -p, -v, --cap-add, etc.
-        docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
-      args:
-        warn: false
+- name: Generic: run container (detached)
+  ansible.builtin.shell: |
+    set -eux
+    docker run {{ run_args_final }} --name {{ container_name }} {{ image_full }}
+  args:
+    warn: false
+  when: not dedicated_task_exists.stat.exists
