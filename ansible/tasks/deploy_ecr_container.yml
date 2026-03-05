@@ -32,7 +32,6 @@
       | docker login --username AWS --password-stdin {{ registry_host }}
   args:
     executable: /bin/bash
-    warn: false
   when: not dedicated_task_exists.stat.exists
 
 - name: "Generic: Pull image (if no dedicated task)"
@@ -41,7 +40,6 @@
     docker pull {{ image_full }}
   args:
     executable: /bin/bash
-    warn: false
   when: not dedicated_task_exists.stat.exists
 
 - name: "Generic: Remove existing container if present (if no dedicated task)"
@@ -49,7 +47,7 @@
     docker rm -f {{ container_name }} || true
   args:
     executable: /bin/bash
-    warn: false
+
   when: not dedicated_task_exists.stat.exists
 
 - name: "Generic: Run container (if no dedicated task)"
@@ -58,5 +56,4 @@
     docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
   args:
     executable: /bin/bash
-    warn: false
   when: not dedicated_task_exists.stat.exists

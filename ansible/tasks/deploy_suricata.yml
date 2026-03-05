@@ -1,55 +1,38 @@
 ---
-# File: ansible/tasks/deploy_suricata.yml
 - name: Set suricata variables
-  ansible.builtin.set_fact:
-    container_name: "{{ ecr.name | default('suricata') | lower }}"
+  set_fact:
+    container_name: "{{ ecr.name | default('suricata') }}"
     image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-    registry_host: "{{ (ecr.ecr_repo_url.split('/')[0]) }}"
+    registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
     run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
 
-- name: Login to ECR for suricata (docker login)
-  ansible.builtin.shell: |
-    set -eux
+- name: Login to ECR for suricata
+  shell: |
     export AWS_DEFAULT_REGION={{ aws_region }}
     aws ecr get-login-password --region {{ aws_region }} \
       | docker login --username AWS --password-stdin {{ registry_host }}
   args:
     executable: /bin/bash
-    warn: false
 
-- name: Pull suricata image from ECR
-  ansible.builtin.shell: |
-    set -eux
-    docker pull {{ image_full }}
+- name: Pull suricata image
+  shell: docker pull {{ image_full }}
   args:
     executable: /bin/bash
-    warn: false
 
-- name: Remove existing suricata container if present
-  ansible.builtin.shell: |
-    docker rm -f {{ container_name }} || true
+- name: Remove existing suricata container
+  shell: docker rm -f {{ container_name }} || true
   args:
     executable: /bin/bash
-    warn: false
 
 - name: Run suricata container
-  ansible.builtin.shell: |
-    set -eux
-    # run_args may include options like --network host -v /var/log/...
-    docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+  shell: docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
   args:
     executable: /bin/bash
-    warn: false
 
-- name: Wait a few seconds for the container to settle
-  ansible.builtin.pause:
-    seconds: 6
-
-- name: Show docker ps for suricata
-  ansible.builtin.shell: docker ps --filter "name={{ container_name }}" --format "{{'{{.Names}} {{.Image}} {{.Status}}'}}"
+- name: Show running container
+  shell: docker ps --filter "name={{ container_name }}"
   register: suricata_ps
   changed_when: false
 
-- name: Debug suricata_ps
-  ansible.builtin.debug:
+- debug:
     var: suricata_ps.stdout_lines
