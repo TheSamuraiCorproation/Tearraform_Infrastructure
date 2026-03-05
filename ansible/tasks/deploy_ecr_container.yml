@@ -1,66 +1,52 @@
 ---
-# File: ansible/tasks/deploy_ecr_container.yml
-# Called by ansible/install_tools.yml for each ecr mapping (loop var = `ecr`)
+# This file is included in a loop from install_tools.yml
+# It receives one variable: item (one tool mapping)
 
-- name: Compose dedicated task filename
-  ansible.builtin.set_fact:
-    dedicated_task_rel: "tasks/deploy_{{ ecr.name | lower }}.yml"
-    dedicated_task_basename: "deploy_{{ ecr.name | lower }}.yml"
+#####################################################################
+# If there is a dedicated deployment file for this tool → use it
+#####################################################################
 
-# Check if dedicated deploy task exists on the controller (playbook host)
-- name: Check if dedicated deploy task exists on controller
-  ansible.builtin.stat:
-    path: "{{ playbook_dir | default('.') }}/{{ dedicated_task_rel }}"
+- name: "Check if dedicated deployment task file exists for {{ item.name }}"
   delegate_to: localhost
-  run_once: true
-  register: dedicated_task_exists
+  run_once: false
+  stat:
+    path: "{{ playbook_dir }}/tasks/deploy_{{ item.name }}.yml"
+  register: tool_task_file
 
-- name: Include dedicated deploy task if present
-  ansible.builtin.include_tasks: "{{ dedicated_task_rel }}"
-  when: dedicated_task_exists.stat.exists
+- name: "Include dedicated deploy file for {{ item.name }} if exists"
+  include_tasks: "deploy_{{ item.name }}.yml"
+  when: tool_task_file.stat.exists
 
-# If there is no dedicated file, perform a generic docker pull + run
-- name: Generic: compute image & container variables
-  ansible.builtin.set_fact:
-    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-    container_name: "{{ (ecr.name | lower).replace(' ', '-') }}"
-    # if run_args already contains -d (detached) leave as-is, otherwise add -d + restart policy
-    run_args_final: >-
-      {% set r = ecr.run_args | default('') %}
-      {% if '-d' in r or '--detach' in r %}
-        {{ r }}
-      {% else %}
-        -d --restart unless-stopped {{ r }}
-      {% endif %}
-  when: not dedicated_task_exists.stat.exists
+#####################################################################
+# If there is NO dedicated file → do generic docker deployment
+#####################################################################
 
-- name: Generic: ensure old container removed if present (ignore errors)
-  ansible.builtin.shell: |
-    docker rm -f {{ container_name }} || true
-  when: not dedicated_task_exists.stat.exists
+- name: "Generic: compute image & container variables"
+  when: not tool_task_file.stat.exists
+  set_fact:
+    full_image: "{{ item.ecr_repo_url }}:{{ item.image_tag | default('latest') }}"
+    container_name: "{{ item.name }}"
 
-- name: Generic: login to ECR (uses AWS CLI on the target)
-  ansible.builtin.shell: |
-    set -eux
-    export AWS_DEFAULT_REGION={{ aws_region | default('eu-central-1') }}
-    aws ecr get-login-password --region $AWS_DEFAULT_REGION \
-      | docker login --username AWS --password-stdin {{ ecr.ecr_repo_url.split('/')[0] }}
+- name: "Generic: login to ECR"
+  when: not tool_task_file.stat.exists
+  shell: |
+    aws ecr get-login-password --region {{ aws_region }} \
+    | docker login --username AWS --password-stdin {{ item.ecr_repo_url.split('/')[0] }}
   args:
     warn: false
-  when: not dedicated_task_exists.stat.exists
 
-- name: Generic: pull image from ECR
-  ansible.builtin.shell: |
-    set -eux
-    docker pull {{ image_full }}
-  args:
-    warn: false
-  when: not dedicated_task_exists.stat.exists
+- name: "Generic: pull image {{ container_name }}"
+  when: not tool_task_file.stat.exists
+  shell: docker pull {{ full_image }}
 
-- name: Generic: run container (detached)
-  ansible.builtin.shell: |
-    set -eux
-    docker run {{ run_args_final }} --name {{ container_name }} {{ image_full }}
-  args:
-    warn: false
-  when: not dedicated_task_exists.stat.exists
+- name: "Generic: stop existing container {{ container_name }} if running"
+  when: not tool_task_file.stat.exists
+  shell: docker rm -f {{ container_name }} || true
+
+- name: "Generic: run container {{ container_name }}"
+  when: not tool_task_file.stat.exists
+  shell: >
+    docker run -d
+    --name {{ container_name }}
+    {{ item.run_args | default('') }}
+    {{ full_image }}
