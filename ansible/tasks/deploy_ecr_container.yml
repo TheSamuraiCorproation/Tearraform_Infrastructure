@@ -1,62 +1,62 @@
 ---
-# ansible/tasks/deploy_ecr_container.yml
-# Called with loop_var: ecr (from install_tools.yml)
+# File: ansible/tasks/deploy_ecr_container.yml
+# Called with loop_var ecr from the main play. This will:
+# 1) check if a dedicated deploy_<name>.yml exists on controller (and include it)
+# 2) otherwise perform a generic docker login/pull/run on the remote host
 
-- name: "Check for dedicated deploy task file for {{ ecr.name }} (on controller)"
-  delegate_to: localhost
-  become: false
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/tasks/deploy_{{ ecr.name }}.yml"
-  register: tool_task_file
-
-- name: "Include dedicated deploy task for {{ ecr.name }} if present"
-  include_tasks: "tasks/deploy_{{ ecr.name }}.yml"
-  when: tool_task_file.stat.exists
-
-# Generic fallback path (if no dedicated file)
-- name: "Generic: compute image & run vars for {{ ecr.name }}"
-  when: not tool_task_file.stat.exists
+- name: "Set dedicated task filename (controller path)"
   ansible.builtin.set_fact:
-    full_image: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-    container_name: "{{ (ecr.name | default(ecr.ecr_repo_url.split('/')[-1])) | lower }}"
-    run_args: "{{ ecr.run_args | default('') }}"
+    dedicated_task_file: "tasks/deploy_{{ ecr.name | default('tool') | lower }}.yml"
 
-- name: "Generic: login to ECR for {{ ecr.name }}"
-  when: not tool_task_file.stat.exists
+- name: "Check for dedicated deploy task file for {{ ecr.name | default('tool') }} (on controller)"
+  local_action: ansible.builtin.stat path="{{ playbook_dir }}/{{ dedicated_task_file }}"
+  register: dedicated_task_exists
+  changed_when: false
+
+- name: "Include dedicated deploy task for {{ ecr.name | default('tool') }} if present"
+  ansible.builtin.include_tasks: "{{ dedicated_task_file }}"
+  when: dedicated_task_exists.stat.exists
+
+- name: "Generic: compute image & container variables"
+  ansible.builtin.set_fact:
+    container_name: "{{ ecr.name | default(ecr.ecr_repo_url.split('/')[-1]) | lower }}"
+    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
+    run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
+
+- name: "Generic: Login to ECR (if no dedicated task)"
   ansible.builtin.shell: |
     set -eux
     export AWS_DEFAULT_REGION={{ aws_region }}
     aws ecr get-login-password --region {{ aws_region }} \
-      | docker login --username AWS --password-stdin {{ ecr.ecr_repo_url.split('/')[0] }}
+      | docker login --username AWS --password-stdin {{ registry_host }}
   args:
+    executable: /bin/bash
     warn: false
+  when: not dedicated_task_exists.stat.exists
 
-- name: "Generic: pull image {{ full_image }}"
-  when: not tool_task_file.stat.exists
+- name: "Generic: Pull image (if no dedicated task)"
   ansible.builtin.shell: |
     set -eux
-    docker pull {{ full_image }}
+    docker pull {{ image_full }}
   args:
+    executable: /bin/bash
     warn: false
+  when: not dedicated_task_exists.stat.exists
 
-- name: "Generic: stop & remove existing container {{ container_name }} (if any)"
-  when: not tool_task_file.stat.exists
+- name: "Generic: Remove existing container if present (if no dedicated task)"
   ansible.builtin.shell: |
-    set -eux
     docker rm -f {{ container_name }} || true
   args:
+    executable: /bin/bash
     warn: false
+  when: not dedicated_task_exists.stat.exists
 
-- name: "Generic: run container {{ container_name }}"
-  when: not tool_task_file.stat.exists
+- name: "Generic: Run container (if no dedicated task)"
   ansible.builtin.shell: |
     set -eux
-    # Use run_args if provided; otherwise plain run
-    if [ -z "{{ run_args | default('') }}" ]; then
-      docker run -d --name {{ container_name }} {{ full_image }}
-    else
-      # NOTE: run_args may include options like -p, -v, --cap-add, etc.
-      docker run -d --name {{ container_name }} {{ run_args }} {{ full_image }}
-    fi
+    docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
   args:
+    executable: /bin/bash
     warn: false
+  when: not dedicated_task_exists.stat.exists
