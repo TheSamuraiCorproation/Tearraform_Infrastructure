@@ -1,0 +1,39 @@
+---
+# ansible/tasks/deploy_suricata.yml
+# Dedicated Suricata deployment. Expects 'ecr' loop var.
+
+- name: "Set suricata variables"
+  ansible.builtin.set_fact:
+    suricata_image: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    suricata_container: "{{ ecr.name | default('suricata') | lower }}"
+    suricata_run_args: "{{ ecr.run_args | default('--network host') }}"
+
+- name: "Login to ECR for suricata"
+  ansible.builtin.shell: |
+    set -eux
+    export AWS_DEFAULT_REGION={{ aws_region }}
+    aws ecr get-login-password --region {{ aws_region }} \
+      | docker login --username AWS --password-stdin {{ ecr.ecr_repo_url.split('/')[0] }}
+  args:
+    warn: false
+
+- name: "Pull suricata image"
+  ansible.builtin.shell: |
+    set -eux
+    docker pull {{ suricata_image }}
+  args:
+    warn: false
+
+- name: "Remove existing suricata container if present"
+  ansible.builtin.shell: |
+    set -eux
+    docker rm -f {{ suricata_container }} || true
+  args:
+    warn: false
+
+- name: "Run suricata container"
+  ansible.builtin.shell: |
+    set -eux
+    docker run -d --name {{ suricata_container }} {{ suricata_run_args }} {{ suricata_image }}
+  args:
+    warn: false

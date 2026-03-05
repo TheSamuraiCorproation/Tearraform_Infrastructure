@@ -1,11 +1,6 @@
 ---
 # ansible/tasks/deploy_ecr_container.yml
-# This file is intended to be called from install_tools.yml with:
-#   loop: "{{ ecr_images }}"
-#   loop_control:
-#     loop_var: ecr
-#
-# The loop variable inside this file is named "ecr".
+# Called with loop_var: ecr (from install_tools.yml)
 
 - name: "Check for dedicated deploy task file for {{ ecr.name }} (on controller)"
   delegate_to: localhost
@@ -18,12 +13,12 @@
   include_tasks: "tasks/deploy_{{ ecr.name }}.yml"
   when: tool_task_file.stat.exists
 
-# Generic deployment when there is no dedicated task file
-- name: "Generic: compute image & container variables for {{ ecr.name }}"
+# Generic fallback path (if no dedicated file)
+- name: "Generic: compute image & run vars for {{ ecr.name }}"
   when: not tool_task_file.stat.exists
   ansible.builtin.set_fact:
     full_image: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-    container_name: "{{ ecr.name | lower }}"
+    container_name: "{{ (ecr.name | default(ecr.ecr_repo_url.split('/')[-1])) | lower }}"
     run_args: "{{ ecr.run_args | default('') }}"
 
 - name: "Generic: login to ECR for {{ ecr.name }}"
@@ -56,6 +51,12 @@
   when: not tool_task_file.stat.exists
   ansible.builtin.shell: |
     set -eux
-    docker run -d --name {{ container_name }} {{ run_args }} {{ full_image }}
+    # Use run_args if provided; otherwise plain run
+    if [ -z "{{ run_args | default('') }}" ]; then
+      docker run -d --name {{ container_name }} {{ full_image }}
+    else
+      # NOTE: run_args may include options like -p, -v, --cap-add, etc.
+      docker run -d --name {{ container_name }} {{ run_args }} {{ full_image }}
+    fi
   args:
     warn: false
