@@ -2,6 +2,7 @@
 - name: Configure EC2 instance (Golden AMI)
   hosts: all
   become: yes
+  gather_facts: no                # <-- do NOT auto-run setup; we'll ensure python first
 
   vars:
     tools_to_install: []
@@ -21,7 +22,23 @@
       - unzip
 
   tasks:
-    - name: Gather facts
+
+    ########################################################################
+    # PRE-FLIGHT: ensure python3 exists on remote (raw uses no remote python)
+    ########################################################################
+    - name: Ensure python3 is installed (preflight)
+      raw: |
+        # if python3 exists do nothing, otherwise install python3 non-interactively
+        if [ -x /usr/bin/python3 ]; then
+          exit 0
+        fi
+        # update + install python3 and python3-apt (some modules require python3-apt)
+        sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-apt
+      # if this fails Ansible will stop — that's desired so you can see the error
+      changed_when: false
+
+    - name: Gather facts (now python3 is available)
       ansible.builtin.setup:
 
     - name: Show tools to install
@@ -46,7 +63,7 @@
         state: present
 
     ########################################################################
-    # CloudWatch agent
+    # CloudWatch agent (unchanged)
     ########################################################################
     - name: Check if CloudWatch agent binary exists
       ansible.builtin.stat:
@@ -91,7 +108,7 @@
         group: root
         mode: '0644'
 
-    - name: Start/Restart CloudWatch agent
+    - name: Start/Restart CloudWatch agent with the config
       ansible.builtin.command:
         cmd: "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop || true; /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a start -m ec2 -c file:{{ cloudwatch_agent_conf_dest }}"
       register: cw_ctl
@@ -111,7 +128,7 @@
         msg: "{{ cw_status.stdout | default('no status output') }}"
 
     ########################################################################
-    # CLASSIFY TOOLS
+    # SAFE CLASSIFICATION
     ########################################################################
     - name: Initialize tool lists
       ansible.builtin.set_fact:
@@ -146,7 +163,7 @@
       when: apt_packages | length > 0
 
     ########################################################################
-    # Docker/ECR tools
+    # If there are ECR images, install Docker + AWS CLI then deploy containers
     ########################################################################
     - name: Install docker and extras (if ECR images requested)
       when: ecr_images | length > 0
@@ -163,7 +180,7 @@
             state: started
             enabled: yes
 
-        - name: Ensure unzip present (AWS CLI installer)
+        - name: Ensure unzip present (aws cli installer)
           ansible.builtin.apt:
             name: unzip
             state: present
