@@ -1,52 +1,61 @@
 ---
-# This file is included in a loop from install_tools.yml
-# It receives one variable: item (one tool mapping)
+# ansible/tasks/deploy_ecr_container.yml
+# This file is intended to be called from install_tools.yml with:
+#   loop: "{{ ecr_images }}"
+#   loop_control:
+#     loop_var: ecr
+#
+# The loop variable inside this file is named "ecr".
 
-#####################################################################
-# If there is a dedicated deployment file for this tool → use it
-#####################################################################
-
-- name: "Check if dedicated deployment task file exists for {{ item.name }}"
+- name: "Check for dedicated deploy task file for {{ ecr.name }} (on controller)"
   delegate_to: localhost
-  run_once: false
-  stat:
-    path: "{{ playbook_dir }}/tasks/deploy_{{ item.name }}.yml"
+  become: false
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/tasks/deploy_{{ ecr.name }}.yml"
   register: tool_task_file
 
-- name: "Include dedicated deploy file for {{ item.name }} if exists"
-  include_tasks: "deploy_{{ item.name }}.yml"
+- name: "Include dedicated deploy task for {{ ecr.name }} if present"
+  include_tasks: "tasks/deploy_{{ ecr.name }}.yml"
   when: tool_task_file.stat.exists
 
-#####################################################################
-# If there is NO dedicated file → do generic docker deployment
-#####################################################################
-
-- name: "Generic: compute image & container variables"
+# Generic deployment when there is no dedicated task file
+- name: "Generic: compute image & container variables for {{ ecr.name }}"
   when: not tool_task_file.stat.exists
-  set_fact:
-    full_image: "{{ item.ecr_repo_url }}:{{ item.image_tag | default('latest') }}"
-    container_name: "{{ item.name }}"
+  ansible.builtin.set_fact:
+    full_image: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    container_name: "{{ ecr.name | lower }}"
+    run_args: "{{ ecr.run_args | default('') }}"
 
-- name: "Generic: login to ECR"
+- name: "Generic: login to ECR for {{ ecr.name }}"
   when: not tool_task_file.stat.exists
-  shell: |
+  ansible.builtin.shell: |
+    set -eux
+    export AWS_DEFAULT_REGION={{ aws_region }}
     aws ecr get-login-password --region {{ aws_region }} \
-    | docker login --username AWS --password-stdin {{ item.ecr_repo_url.split('/')[0] }}
+      | docker login --username AWS --password-stdin {{ ecr.ecr_repo_url.split('/')[0] }}
   args:
     warn: false
 
-- name: "Generic: pull image {{ container_name }}"
+- name: "Generic: pull image {{ full_image }}"
   when: not tool_task_file.stat.exists
-  shell: docker pull {{ full_image }}
+  ansible.builtin.shell: |
+    set -eux
+    docker pull {{ full_image }}
+  args:
+    warn: false
 
-- name: "Generic: stop existing container {{ container_name }} if running"
+- name: "Generic: stop & remove existing container {{ container_name }} (if any)"
   when: not tool_task_file.stat.exists
-  shell: docker rm -f {{ container_name }} || true
+  ansible.builtin.shell: |
+    set -eux
+    docker rm -f {{ container_name }} || true
+  args:
+    warn: false
 
 - name: "Generic: run container {{ container_name }}"
   when: not tool_task_file.stat.exists
-  shell: >
-    docker run -d
-    --name {{ container_name }}
-    {{ item.run_args | default('') }}
-    {{ full_image }}
+  ansible.builtin.shell: |
+    set -eux
+    docker run -d --name {{ container_name }} {{ run_args }} {{ full_image }}
+  args:
+    warn: false
