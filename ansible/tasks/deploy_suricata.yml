@@ -1,13 +1,23 @@
 ---
+- name: Ensure suricata host log dir exists
+  ansible.builtin.file:
+    path: /var/log/suricata
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: yes
+
 - name: Set suricata variables
   set_fact:
     container_name: "{{ ecr.name | default('suricata') }}"
     image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
     registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
-    run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
+    run_args: "{{ ecr.run_args | default('') }}"
 
 - name: Login to ECR for suricata
   ansible.builtin.shell: |
+    set -eux
     export AWS_DEFAULT_REGION={{ aws_region }}
     aws ecr get-login-password --region {{ aws_region }} \
       | docker login --username AWS --password-stdin {{ registry_host }}
@@ -24,12 +34,27 @@
     cmd: docker rm -f {{ container_name }} || true
     executable: /bin/bash
 
-- name: Run suricata container
+- name: Run suricata container (ensure detached)
   ansible.builtin.shell:
-    cmd: docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+    cmd: docker run -d {{ run_args }} --name {{ container_name }} {{ image_full }}
     executable: /bin/bash
 
-- name: Show running container
+- name: Wait for suricata container to be running (simple check)
+  ansible.builtin.shell: |
+    set -eux
+    tries=0
+    while [ $tries -lt 10 ]; do
+      docker ps --format '{{"{{.Names}}|{{.Status}}|{{.Image}}"}}' | grep -E "^{{ container_name }}\b" && exit 0 || true
+      tries=$((tries + 1))
+      sleep 3
+    done
+    echo "suricata container not running after timeout" >&2
+    docker ps -a || true
+    exit 2
+  args:
+    executable: /bin/bash
+
+- name: Show running container info
   ansible.builtin.shell:
     cmd: docker ps --filter "name={{ container_name }}"
     executable: /bin/bash

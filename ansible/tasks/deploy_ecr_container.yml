@@ -23,7 +23,7 @@
     container_name: "{{ ecr.name | default(ecr.ecr_repo_url.split('/')[-1]) | lower }}"
     image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
     registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
-    run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
+    run_args: "{{ ecr.run_args | default('') }}"
 
 - name: "Generic: Login to ECR (if no dedicated task)"
   ansible.builtin.shell: |
@@ -50,10 +50,29 @@
     executable: /bin/bash
   when: not dedicated_task_exists.stat.exists
 
-- name: "Generic: Run container (if no dedicated task)"
+- name: "Generic: Run container (if no dedicated task) — ensure detached"
   ansible.builtin.shell: |
     set -eux
-    docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+    # Always include -d to avoid foreground blocking even if user didn't provide -d
+    docker run -d {{ run_args }} --name {{ container_name }} {{ image_full }}
+  args:
+    executable: /bin/bash
+  when: not dedicated_task_exists.stat.exists
+
+- name: "Generic: Wait for container to appear in docker ps"
+  ansible.builtin.shell: |
+    set -eux
+    tries=0
+    while [ $tries -lt 8 ]; do
+      if docker ps --format '{{"{{.Names}}|{{.Status}}|{{.Image}}"}}' | grep -E "^{{ container_name }}\b" >/dev/null 2>&1; then
+        exit 0
+      fi
+      tries=$((tries + 1))
+      sleep 3
+    done
+    echo "Container {{ container_name }} not running after timeout" >&2
+    docker ps -a || true
+    exit 2
   args:
     executable: /bin/bash
   when: not dedicated_task_exists.stat.exists
