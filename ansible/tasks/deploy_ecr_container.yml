@@ -1,78 +1,32 @@
 ---
-# File: ansible/tasks/deploy_ecr_container.yml
-# Called with loop_var ecr from the main play.
 
-- name: "Set dedicated task filename (controller path)"
-  ansible.builtin.set_fact:
-    dedicated_task_file: "tasks/deploy_{{ ecr.name | default('tool') | lower }}.yml"
+- name: Set container variables
+  set_fact:
+    image_full: "{{ item.ecr_repo_url }}:{{ item.image_tag | default('latest') }}"
+    container_name: "{{ item.name }}"
+    run_args: "{{ item.run_args | default('') }}"
 
-- name: "Check for dedicated deploy task file for {{ ecr.name | default('tool') }} (on controller)"
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/{{ dedicated_task_file }}"
-  register: dedicated_task_exists
-  changed_when: false
-  delegate_to: localhost
-  become: false
-
-- name: "Include dedicated deploy task for {{ ecr.name | default('tool') }} if present"
-  ansible.builtin.include_tasks: "{{ dedicated_task_file }}"
-  when: dedicated_task_exists.stat.exists
-
-- name: "Generic: compute image & container variables"
-  ansible.builtin.set_fact:
-    container_name: "{{ ecr.name | default(ecr.ecr_repo_url.split('/')[-1]) | lower }}"
-    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-    registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
-    run_args: "{{ ecr.run_args | default('') }}"
-
-- name: "Generic: Login to ECR (if no dedicated task)"
-  ansible.builtin.shell: |
-    set -eux
-    export AWS_DEFAULT_REGION={{ aws_region }}
-    aws ecr get-login-password --region {{ aws_region }} \
-      | docker login --username AWS --password-stdin {{ registry_host }}
+- name: Login to AWS ECR
+  shell: |
+    aws ecr get-login-password --region eu-central-1 \
+    | docker login --username AWS --password-stdin {{ item.ecr_repo_url.split('/')[0] }}
   args:
     executable: /bin/bash
-  when: not dedicated_task_exists.stat.exists
 
-- name: "Generic: Pull image (if no dedicated task)"
-  ansible.builtin.shell: |
-    set -eux
+- name: Pull Docker image
+  shell: |
     docker pull {{ image_full }}
   args:
     executable: /bin/bash
-  when: not dedicated_task_exists.stat.exists
 
-- name: "Generic: Remove existing container if present (if no dedicated task)"
-  ansible.builtin.shell: |
+- name: Stop container if already running
+  shell: |
     docker rm -f {{ container_name }} || true
   args:
     executable: /bin/bash
-  when: not dedicated_task_exists.stat.exists
 
-- name: "Generic: Run container (if no dedicated task) — ensure detached"
-  ansible.builtin.shell: |
-    set -eux
-    # Always include -d to avoid foreground blocking even if user didn't provide -d
+- name: Run container
+  shell: |
     docker run -d {{ run_args }} --name {{ container_name }} {{ image_full }}
   args:
     executable: /bin/bash
-  when: not dedicated_task_exists.stat.exists
-
-- name: "Generic: Wait for container to appear in docker ps"
-  ansible.builtin.shell: |
-    set -eux
-    tries=0
-    while [ $tries -lt 8 ]; do
-      if docker ps --format '{{"{{.Names}}|{{.Status}}|{{.Image}}"}}' | grep -E "^{{ container_name }}\b" >/dev/null 2>&1; then
-        exit 0
-      fi
-      tries=$((tries + 1))
-      sleep 3
-    done
-    echo "Container {{ container_name }} not running after timeout" >&2
-    docker ps -a || true
-    exit 2
-  args:
-    executable: /bin/bash
-  when: not dedicated_task_exists.stat.exists
