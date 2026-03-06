@@ -7,7 +7,7 @@
     run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
 
 - name: Login to ECR for suricata
-  shell: |
+  ansible.builtin.shell: |
     export AWS_DEFAULT_REGION={{ aws_region }}
     aws ecr get-login-password --region {{ aws_region }} \
       | docker login --username AWS --password-stdin {{ registry_host }}
@@ -15,22 +15,24 @@
     executable: /bin/bash
 
 - name: Pull suricata image
-  shell: docker pull {{ image_full }}
-  args:
+  ansible.builtin.shell:
+    cmd: docker pull {{ image_full }}
     executable: /bin/bash
 
 - name: Remove existing suricata container
-  shell: docker rm -f {{ container_name }} || true
-  args:
+  ansible.builtin.shell:
+    cmd: docker rm -f {{ container_name }} || true
     executable: /bin/bash
 
 - name: Run suricata container
-  shell: docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
-  args:
+  ansible.builtin.shell:
+    cmd: docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
     executable: /bin/bash
 
 - name: Show running container
-  shell: docker ps --filter "name={{ container_name }}"
+  ansible.builtin.shell:
+    cmd: docker ps --filter "name={{ container_name }}"
+    executable: /bin/bash
   register: suricata_ps
   changed_when: false
 

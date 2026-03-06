@@ -1,17 +1,18 @@
 ---
 # File: ansible/tasks/deploy_ecr_container.yml
-# Called with loop_var ecr from the main play. This will:
-# 1) check if a dedicated deploy_<name>.yml exists on controller (and include it)
-# 2) otherwise perform a generic docker login/pull/run on the remote host
+# Called with loop_var ecr from the main play.
 
 - name: "Set dedicated task filename (controller path)"
   ansible.builtin.set_fact:
     dedicated_task_file: "tasks/deploy_{{ ecr.name | default('tool') | lower }}.yml"
 
 - name: "Check for dedicated deploy task file for {{ ecr.name | default('tool') }} (on controller)"
-  local_action: ansible.builtin.stat path="{{ playbook_dir }}/{{ dedicated_task_file }}"
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/{{ dedicated_task_file }}"
   register: dedicated_task_exists
   changed_when: false
+  delegate_to: localhost
+  become: false
 
 - name: "Include dedicated deploy task for {{ ecr.name | default('tool') }} if present"
   ansible.builtin.include_tasks: "{{ dedicated_task_file }}"
@@ -47,7 +48,6 @@
     docker rm -f {{ container_name }} || true
   args:
     executable: /bin/bash
-
   when: not dedicated_task_exists.stat.exists
 
 - name: "Generic: Run container (if no dedicated task)"

@@ -53,7 +53,7 @@
     fi
 
     # If ECR manager image is in ECR, ensure login before pull (if registry looks like an AWS ECR URI)
-    if echo "{{ manager_image }}" | grep -E '^[0-9]+\\.dkr\\.ecr\\.' >/dev/null 2>&1; then
+    if echo "{{ manager_image }}" | grep -E '^[0-9]+\.dkr\.ecr\.' >/dev/null 2>&1; then
       REGISTRY=$(echo "{{ manager_image }}" | cut -d'/' -f1)
       if command -v /usr/local/bin/aws >/dev/null 2>&1; then
         /usr/local/bin/aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin ${REGISTRY}
@@ -65,4 +65,12 @@
     ${COMPOSE} -f /opt/wazuh/docker-compose.yml pull
     ${COMPOSE} -f /opt/wazuh/docker-compose.yml up -d
   args:
-    warn: false
+    executable: /bin/bash
+
+- name: Wait for indexer to be healthy (simple wait)
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 9200
+    delay: 10
+    timeout: 120
+  become: yes
