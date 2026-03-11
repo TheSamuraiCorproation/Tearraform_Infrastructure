@@ -15,7 +15,15 @@ pipeline {
 
     stage('Checkout repository') {
       steps {
-        checkout scm
+        checkout([$class: 'GitSCM',
+          branches: [[name: '*/main']],
+          doGenerateSubmoduleConfigurations: false,
+          extensions: [],
+          userRemoteConfigs: [[
+            url: 'https://github.com/NasriMohamedHedi/terraform-infra.git',
+            credentialsId: 'github-pat'
+          ]]
+        ])
       }
     }
 
@@ -60,25 +68,26 @@ pipeline {
     }
 
     stage('Render Diagram (PNG + SVG)') {
-  steps {
-    sh '''
-      set -e
+      steps {
+        sh '''
+          set -e
 
-      echo "🔍 Debug"
-      which mmdc
-      ls -l /usr/local/bin/chrome-headless-wrapper
+          echo "🔍 Debug"
+          which mmdc
+          ls -l /usr/local/bin/chrome-headless-wrapper
 
-      export PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chrome-headless-wrapper
-      export PUPPETEER_SKIP_DOWNLOAD=true
+          export PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chrome-headless-wrapper
+          export PUPPETEER_SKIP_DOWNLOAD=true
 
-      echo "🚀 Rendering PNG"
-      mmdc -i diagram-output/lab.mmd -o diagram-output/lab.png
+          echo "🚀 Rendering PNG"
+          mmdc -i diagram-output/lab.mmd -o diagram-output/lab.png
 
-      echo "🚀 Rendering SVG"
-      mmdc -i diagram-output/lab.mmd -o diagram-output/lab.svg
-    '''
-  }
-}
+          echo "🚀 Rendering SVG"
+          mmdc -i diagram-output/lab.mmd -o diagram-output/lab.svg
+        '''
+      }
+    }
+
   }
 
   post {
