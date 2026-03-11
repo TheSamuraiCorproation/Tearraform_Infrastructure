@@ -1,43 +1,51 @@
 ---
 # ansible/tasks/deploy_elk.yml
-# This file is intended to be included from install_tools.yml with loop_var `ecr`.
-# Do NOT add a play header (hosts/tasks). Only tasks.
+# Included from install_tools.yml via include_tasks
 
-- name: "Set ELK variables (from ecr loop var)"
+- name: Set basic ELK variables
   set_fact:
     container_name: "{{ (ecr.name | default('elk')) | lower }}"
     image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
     registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
     run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
-    elk_base_dir: /opt/elk
+    elk_base_dir: "/opt/elk"
+
+- name: Set pipeline variables
+  set_fact:
     elk_pipeline_dir: "{{ elk_base_dir }}/pipeline"
     generated_pipeline_on_controller: "{{ playbook_dir }}/tmp/01-rules.conf"
 
-- name: "Create ELK base directory"
+# --------------------------------------------------
+# Create directories
+# --------------------------------------------------
+
+- name: Create ELK base directory
   file:
     path: "{{ elk_base_dir }}"
     state: directory
     mode: "0755"
-    owner: root
-    group: root
 
-- name: "Create pipeline directory"
+- name: Create pipeline directory
   file:
     path: "{{ elk_pipeline_dir }}"
     state: directory
     mode: "0755"
-    owner: root
-    group: root
 
-- name: "Copy ELK rules file from controller to host pipeline dir"
+# --------------------------------------------------
+# Copy rules
+# --------------------------------------------------
+
+- name: Copy ELK rules to host
   copy:
     src: "files/elk_rules.xml"
     dest: "{{ elk_pipeline_dir }}/elk_rules.xml"
-    owner: root
-    group: root
     mode: "0644"
 
-- name: "Ensure controller tmp dir exists for pipeline generation"
+# --------------------------------------------------
+# Generate Logstash pipeline (on Jenkins controller)
+# --------------------------------------------------
+
+- name: Ensure tmp dir exists on controller
   delegate_to: localhost
   run_once: true
   file:
@@ -45,63 +53,86 @@
     state: directory
     mode: "0755"
 
-- name: "Generate logstash pipeline on controller (no sudo)"
+- name: Generate Logstash pipeline from rules
   delegate_to: localhost
   become: false
   shell: |
-    set -eux
-    python3 "{{ playbook_dir }}/files/generate_logstash_pipeline.py" "{{ playbook_dir }}/files/elk_rules.xml" > "{{ generated_pipeline_on_controller }}"
+    python3 "{{ playbook_dir }}/files/generate_logstash_pipeline.py" \
+    "{{ playbook_dir }}/files/elk_rules.xml" \
+    > "{{ generated_pipeline_on_controller }}"
   args:
     executable: /bin/bash
-  register: gen_pipeline
-  changed_when: gen_pipeline.rc == 0
 
-- name: "Copy generated pipeline from controller to host pipeline dir"
+# --------------------------------------------------
+# Copy generated pipeline to EC2
+# --------------------------------------------------
+
+- name: Copy generated Logstash pipeline
   copy:
     src: "{{ generated_pipeline_on_controller }}"
     dest: "{{ elk_pipeline_dir }}/01-rules.conf"
-    owner: root
-    group: root
     mode: "0644"
 
-- name: "Login to AWS ECR (on host)"
+# --------------------------------------------------
+# Login to ECR
+# --------------------------------------------------
+
+- name: Login to AWS ECR
   shell: |
-    set -eux
-    export AWS_DEFAULT_REGION={{ aws_region | default('eu-central-1') }}
-    aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin {{ registry_host }}
+    aws ecr get-login-password --region eu-central-1 \
+    | docker login --username AWS --password-stdin {{ registry_host }}
   args:
     executable: /bin/bash
 
-- name: "Pull ELK container image"
+# --------------------------------------------------
+# Pull image
+# --------------------------------------------------
+
+- name: Pull ELK image
   shell: docker pull "{{ image_full }}"
   args:
     executable: /bin/bash
 
-- name: "Remove existing ELK container if present"
+# --------------------------------------------------
+# Remove old container
+# --------------------------------------------------
+
+- name: Remove old ELK container
   shell: |
     if docker ps -a --format '{{.Names}}' | grep -q '^{{ container_name }}$'; then
-      docker rm -f {{ container_name }} || true
+      docker rm -f {{ container_name }}
     fi
   args:
     executable: /bin/bash
   ignore_errors: true
 
-- name: "Run ELK container (Logstash) from ECR"
+# --------------------------------------------------
+# Run container
+# --------------------------------------------------
+
+- name: Run ELK container
   shell: |
-    set -eux
-    # use provided run_args (should include -d and any -p -v)
-    docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+    docker run {{ run_args }} \
+      --name {{ container_name }} \
+      {{ image_full }}
   args:
     executable: /bin/bash
 
-- name: "Wait for Logstash Beats port (5044) to be open on host"
+# --------------------------------------------------
+# Wait for Logstash
+# --------------------------------------------------
+
+- name: Wait for Logstash port
   wait_for:
     port: 5044
     host: "{{ inventory_hostname }}"
-    state: started
     timeout: 60
 
-- name: "Show running containers"
+# --------------------------------------------------
+# Debug containers
+# --------------------------------------------------
+
+- name: Show running containers
   shell: docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}'
   register: docker_ps
   changed_when: false
