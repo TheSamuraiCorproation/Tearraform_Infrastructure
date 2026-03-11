@@ -1,0 +1,78 @@
+<group name="auditd,custom,post_exploit">
+
+  <!-- Reverse Shell using /dev/tcp or bash -c -->
+  <rule id="110100" level="10">
+    <if_sid>80700</if_sid>
+    <description>Auditd - Potential reverse shell via bash -c</description>
+    <match>bash -c</match>
+  </rule>
+
+  <rule id="111001" level="10">
+    <if_sid>80700</if_sid>
+    <description>Auditd - Reverse shell pattern using /dev/tcp</description>
+    <match>/dev/tcp</match>
+  </rule>
+
+  <!-- SSH Key Persistence -->
+  <rule id="110101" level="10">
+    <if_sid>80700</if_sid>
+    <description>Auditd - SSH authorized_keys modified (possible persistence)</description>
+    <match>authorized_keys</match>
+  </rule>
+
+  <!-- /tmp Execution -->
+  <rule id="110102" level="8">
+    <if_sid>80700</if_sid>
+    <description>Auditd - Execution from /tmp directory</description>
+    <match>/tmp/</match>
+  </rule>
+
+  <rule id="111021" level="8">
+    <if_sid>80700</if_sid>
+    <description>Auditd - Regex match for /tmp path</description>
+    <regex>/tmp/.*</regex>
+  </rule>
+
+  <!-- SUID Escalation - find -->
+  <rule id="110103" level="9">
+    <if_sid>80700</if_sid>
+    <description>Auditd - find executed (potential privilege escalation)</description>
+    <match>find</match>
+  </rule>
+
+  <!-- SUID Escalation - nmap -->
+  <rule id="110104" level="9">
+    <if_sid>80700</if_sid>
+    <description>Auditd - nmap executed (possible SUID misuse)</description>
+    <match>nmap</match>
+  </rule>
+
+  <!-- SUID Escalation - bash -->
+  <rule id="110105" level="9">
+    <if_sid>80700</if_sid>
+    <description>Auditd - bash executed from SUID context</description>
+    <match>/bin/bash</match>
+  </rule>
+
+  <!-- Exfiltration via SCP -->
+  <rule id="110106" level="9">
+    <if_sid>80700</if_sid>
+    <description>Auditd - SCP command used (possible data exfiltration)</description>
+    <match>scp</match>
+  </rule>
+
+  <!-- MySQL Root Access -->
+  <rule id="110107" level="8">
+    <if_sid>80700</if_sid>
+    <description>Auditd - MySQL client launched (check for root login)</description>
+    <match>mysql</match>
+  </rule>
+
+  <rule id="111071" level="8">
+    <if_sid>80700</if_sid>
+    <description>Auditd - MySQL root login attempt via command args</description>
+    <regex>mysql\s+-u\s*root</regex>
+  </rule>
+
+</group>
+

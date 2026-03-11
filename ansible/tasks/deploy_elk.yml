@@ -1,0 +1,72 @@
+---
+- name: Set ELK variables
+  set_fact:
+    container_name: "{{ ecr.name | default('elk') }}"
+    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
+    run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
+    elk_pipeline_host_dir: "/opt/elk/pipeline"
+
+- name: Create host pipeline dir for ELK
+  file:
+    path: "{{ elk_pipeline_host_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Copy rules file to host pipeline dir (from controller files/)
+  copy:
+    src: "../files/elk_rules.xml"
+    dest: "{{ elk_pipeline_host_dir }}/elk_rules.xml"
+    owner: root
+    group: root
+    mode: '0644'
+
+# optional: if you have a script to generate pipeline from rules
+- name: Generate logstash pipeline on controller then copy to host
+  delegate_to: localhost
+  run_once: true
+  shell: |
+    python3 ansible/files/generate_logstash_pipeline.py ansible/files/elk_rules.xml > /tmp/01-rules.conf
+  args:
+    creates: /tmp/01-rules.conf
+
+- name: Copy generated pipeline to host
+  copy:
+    src: /tmp/01-rules.conf
+    dest: "{{ elk_pipeline_host_dir }}/01-rules.conf"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Login to ECR for elk
+  ansible.builtin.shell: |
+    set -eux
+    export AWS_DEFAULT_REGION={{ aws_region }}
+    aws ecr get-login-password --region {{ aws_region }} \
+      | docker login --username AWS --password-stdin {{ registry_host }}
+  args:
+    executable: /bin/bash
+
+- name: Pull ELK image
+  ansible.builtin.shell:
+    cmd: docker pull {{ image_full }}
+    executable: /bin/bash
+
+- name: Remove existing ELK container
+  ansible.builtin.shell:
+    cmd: docker rm -f {{ container_name }} || true
+    executable: /bin/bash
+
+- name: Run ELK container on host
+  ansible.builtin.shell:
+    cmd: docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+    executable: /bin/bash
+
+- name: Wait for logstash to be listening on beats port
+  wait_for:
+    host: 127.0.0.1
+    port: 5044
+    timeout: 60
+  delegate_to: localhost
