@@ -1,4 +1,6 @@
 ---
+# Deploy ELK (Logstash) container from ECR and prepare pipeline rules
+
 - name: Set ELK variables
   set_fact:
     container_name: "{{ ecr.name | default('elk') }}"
@@ -7,7 +9,19 @@
     run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
     elk_pipeline_host_dir: "/opt/elk/pipeline"
 
-- name: Create host pipeline dir for ELK
+# -------------------------------------------------------
+# Prepare host directories
+# -------------------------------------------------------
+
+- name: Create ELK base directory
+  file:
+    path: /opt/elk
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create pipeline directory
   file:
     path: "{{ elk_pipeline_host_dir }}"
     state: directory
@@ -15,7 +29,11 @@
     group: root
     mode: '0755'
 
-- name: Copy rules file to host pipeline dir (from controller files/)
+# -------------------------------------------------------
+# Copy rules file to EC2
+# -------------------------------------------------------
+
+- name: Copy ELK rules file
   copy:
     src: "../files/elk_rules.xml"
     dest: "{{ elk_pipeline_host_dir }}/elk_rules.xml"
@@ -23,16 +41,27 @@
     group: root
     mode: '0644'
 
-# optional: if you have a script to generate pipeline from rules
-- name: Generate logstash pipeline on controller then copy to host
+# -------------------------------------------------------
+# Generate Logstash pipeline on controller (Jenkins VM)
+# -------------------------------------------------------
+
+- name: Generate logstash pipeline locally on controller
   delegate_to: localhost
+  become: false
   run_once: true
   shell: |
-    python3 ansible/files/generate_logstash_pipeline.py ansible/files/elk_rules.xml > /tmp/01-rules.conf
+    set -eux
+    python3 "{{ playbook_dir }}/files/generate_logstash_pipeline.py" \
+      "{{ playbook_dir }}/files/elk_rules.xml" \
+      > /tmp/01-rules.conf
   args:
     creates: /tmp/01-rules.conf
 
-- name: Copy generated pipeline to host
+# -------------------------------------------------------
+# Copy generated pipeline to EC2
+# -------------------------------------------------------
+
+- name: Copy generated pipeline to EC2
   copy:
     src: /tmp/01-rules.conf
     dest: "{{ elk_pipeline_host_dir }}/01-rules.conf"
@@ -40,8 +69,12 @@
     group: root
     mode: '0644'
 
-- name: Login to ECR for elk
-  ansible.builtin.shell: |
+# -------------------------------------------------------
+# Login to AWS ECR
+# -------------------------------------------------------
+
+- name: Login to AWS ECR
+  shell: |
     set -eux
     export AWS_DEFAULT_REGION={{ aws_region }}
     aws ecr get-login-password --region {{ aws_region }} \
@@ -49,24 +82,54 @@
   args:
     executable: /bin/bash
 
-- name: Pull ELK image
-  ansible.builtin.shell:
-    cmd: docker pull {{ image_full }}
+# -------------------------------------------------------
+# Pull the ELK image
+# -------------------------------------------------------
+
+- name: Pull ELK container image
+  shell: docker pull {{ image_full }}
+  args:
     executable: /bin/bash
+
+# -------------------------------------------------------
+# Remove existing container if exists
+# -------------------------------------------------------
 
 - name: Remove existing ELK container
-  ansible.builtin.shell:
-    cmd: docker rm -f {{ container_name }} || true
+  shell: docker rm -f {{ container_name }} || true
+  args:
     executable: /bin/bash
 
-- name: Run ELK container on host
-  ansible.builtin.shell:
-    cmd: docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+# -------------------------------------------------------
+# Run ELK container
+# -------------------------------------------------------
+
+- name: Run ELK container
+  shell: |
+    docker run {{ run_args }} \
+      --name {{ container_name }} \
+      {{ image_full }}
+  args:
     executable: /bin/bash
 
-- name: Wait for logstash to be listening on beats port
+# -------------------------------------------------------
+# Wait for Logstash port
+# -------------------------------------------------------
+
+- name: Wait for Logstash Beats port
   wait_for:
-    host: 127.0.0.1
     port: 5044
+    host: 127.0.0.1
+    delay: 5
     timeout: 60
-  delegate_to: localhost
+
+# -------------------------------------------------------
+# Show running containers
+# -------------------------------------------------------
+
+- name: Show running containers
+  shell: docker ps
+  register: docker_ps
+
+- debug:
+    var: docker_ps.stdout_lines
