@@ -1,37 +1,53 @@
 version: '3.8'
 
 services:
+
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
       - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
     ports:
       - "9200:9200"
     volumes:
-      - es_data:/usr/share/elasticsearch/data
+      - esdata:/usr/share/elasticsearch/data
+    restart: unless-stopped
 
+  {{- /* Logstash uses your ECR image provided in JSON (elk.ecr_repo_url) */ -}}
   logstash:
-    image: "{{ elk_image | default('docker.elastic.co/logstash/logstash:8.11.1') }}"
+    image: "{{ logstash_image }}"
     container_name: logstash
     depends_on:
       - elasticsearch
     volumes:
-      - ./pipeline:/usr/share/logstash/pipeline
+      - /opt/elk/pipeline:/usr/share/logstash/pipeline:ro
+      - /opt/elk/rules:/usr/share/logstash/rules:ro
     ports:
-      - "5000:5000"
+      - "5044:5044"
+    restart: unless-stopped
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.11.1
+    image: docker.elastic.co/kibana/kibana:8.12.0
     container_name: kibana
+    depends_on:
+      - elasticsearch
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     ports:
       - "5601:5601"
+    restart: unless-stopped
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.12.0
+    container_name: filebeat
     depends_on:
-      - elasticsearch
+      - logstash
+    volumes:
+      - /opt/elk/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/log/suricata:/var/log/suricata:ro
+    restart: unless-stopped
 
 volumes:
-  es_data:
+  esdata:

@@ -1,0 +1,13 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/suricata/eve.json
+  json.keys_under_root: true
+  json.add_error_key: true
+  processors:
+    - drop_event.when:
+        has_fields: ["log", "message"]
+# send to logstash
+output.logstash:
+  hosts: ["logstash:5044"]

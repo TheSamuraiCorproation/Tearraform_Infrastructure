@@ -1,17 +1,11 @@
 ---
-# Deploy ELK (Logstash) container from ECR and prepare pipeline rules
+# deploy_elk.yml — invoked when tools_to_install contains an object with "name": "elk"
 
 - name: Set ELK variables
   set_fact:
-    container_name: "{{ ecr.name | default('elk') }}"
-    image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
-    registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
-    run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
-    elk_pipeline_host_dir: "/opt/elk/pipeline"
-
-# -------------------------------------------------------
-# Prepare host directories
-# -------------------------------------------------------
+    elk_name: "{{ ecr.name | default('elk') }}"
+    logstash_image: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
+    playbook_files_dir: "{{ playbook_dir }}/files"
 
 - name: Create ELK base directory
   file:
@@ -23,113 +17,145 @@
 
 - name: Create pipeline directory
   file:
-    path: "{{ elk_pipeline_host_dir }}"
+    path: /opt/elk/pipeline
     state: directory
     owner: root
     group: root
     mode: '0755'
 
-# -------------------------------------------------------
-# Copy rules file to EC2
-# -------------------------------------------------------
+- name: Create rules directory
+  file:
+    path: /opt/elk/rules
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
 
-- name: Copy ELK rules file
+- name: Copy ELK rules file to host pipeline dir (from controller files/)
   copy:
-    src: "../files/elk_rules.xml"
-    dest: "{{ elk_pipeline_host_dir }}/elk_rules.xml"
+    src: "{{ playbook_files_dir }}/elk_rules.xml"
+    dest: /opt/elk/rules/elk_rules.xml
     owner: root
     group: root
     mode: '0644'
 
-# -------------------------------------------------------
-# Generate Logstash pipeline on controller (Jenkins VM)
-# -------------------------------------------------------
-
-- name: Generate logstash pipeline locally on controller
-  delegate_to: localhost
-  become: false
+- name: Ensure generated files dir exists on controller (controller side)
+  local_action:
+    module: file
+    path: "{{ playbook_files_dir }}/generated"
+    state: directory
+    mode: '0755'
   run_once: true
-  shell: |
-    set -eux
-    python3 "{{ playbook_dir }}/files/generate_logstash_pipeline.py" \
-      "{{ playbook_dir }}/files/elk_rules.xml" \
-      > /tmp/01-rules.conf
+
+- name: Generate logstash pipeline on controller (no sudo) from rules XML
+  # run on controller (Jenkins host) so we don't need python inside container
+  command: >
+    python3 "{{ playbook_files_dir }}/generate_logstash_pipeline.py"
+    "{{ playbook_files_dir }}/elk_rules.xml"
   args:
-    creates: /tmp/01-rules.conf
+    chdir: "{{ playbook_files_dir }}"
+  delegate_to: localhost
+  register: gen_pipeline
+  changed_when: gen_pipeline.rc == 0
+  failed_when: gen_pipeline.rc != 0
 
-# -------------------------------------------------------
-# Copy generated pipeline to EC2
-# -------------------------------------------------------
-
-- name: Copy generated pipeline to EC2
+- name: Write generated filter to a file on controller
   copy:
-    src: /tmp/01-rules.conf
-    dest: "{{ elk_pipeline_host_dir }}/01-rules.conf"
+    content: "{{ gen_pipeline.stdout }}"
+    dest: "{{ playbook_files_dir }}/generated/01-rules.conf"
+    mode: '0644'
+  delegate_to: localhost
+
+- name: Copy 00-input.conf to EC2 pipeline dir
+  copy:
+    src: "{{ playbook_files_dir }}/00-input.conf"
+    dest: /opt/elk/pipeline/00-input.conf
     owner: root
     group: root
     mode: '0644'
 
-# -------------------------------------------------------
-# Login to AWS ECR
-# -------------------------------------------------------
+- name: Copy generated 01-rules.conf to EC2 pipeline dir
+  copy:
+    src: "{{ playbook_files_dir }}/generated/01-rules.conf"
+    dest: /opt/elk/pipeline/01-rules.conf
+    owner: root
+    group: root
+    mode: '0644'
 
-- name: Login to AWS ECR
+- name: Copy 99-output.conf to EC2 pipeline dir
+  copy:
+    src: "{{ playbook_files_dir }}/99-output.conf"
+    dest: /opt/elk/pipeline/99-output.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Copy Filebeat config to /opt/elk/filebeat.yml
+  copy:
+    src: "{{ playbook_files_dir }}/filebeat.yml"
+    dest: /opt/elk/filebeat.yml
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Render docker-compose for ELK (template)
+  template:
+    src: "../templates/docker-compose.elk.j2"
+    dest: /opt/elk/docker-compose.yml
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    logstash_image: "{{ logstash_image }}"
+
+- name: Ensure /opt/elk owned by root
+  file:
+    path: /opt/elk
+    owner: root
+    group: root
+    recurse: yes
+
+- name: Login to ECR (if logstash image is in ECR)
   shell: |
     set -eux
-    export AWS_DEFAULT_REGION={{ aws_region }}
-    aws ecr get-login-password --region {{ aws_region }} \
-      | docker login --username AWS --password-stdin {{ registry_host }}
+    REG="{{ logstash_image.split('/')[0] }}"
+    if [[ "${REG}" =~ [0-9]+\.[a-z0-9-]+\.ecr\.[a-z0-9-]+\.amazonaws\.com ]]; then
+      aws ecr get-login-password --region {{ aws_region | default('eu-central-1') }} \
+        | docker login --username AWS --password-stdin ${REG}
+    fi
   args:
     executable: /bin/bash
+  become: yes
 
-# -------------------------------------------------------
-# Pull the ELK image
-# -------------------------------------------------------
-
-- name: Pull ELK container image
-  shell: docker pull {{ image_full }}
-  args:
-    executable: /bin/bash
-
-# -------------------------------------------------------
-# Remove existing container if exists
-# -------------------------------------------------------
-
-- name: Remove existing ELK container
-  shell: docker rm -f {{ container_name }} || true
-  args:
-    executable: /bin/bash
-
-# -------------------------------------------------------
-# Run ELK container
-# -------------------------------------------------------
-
-- name: Run ELK container
+- name: Pull and start ELK stack (docker compose)
   shell: |
-    docker run {{ run_args }} \
-      --name {{ container_name }} \
-      {{ image_full }}
+    set -eux
+    cd /opt/elk
+    # prefer docker compose plugin
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+      COMPOSE="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+      COMPOSE="docker-compose"
+    else
+      echo "ERROR: no docker compose available" >&2
+      exit 2
+    fi
+    ${COMPOSE} -f /opt/elk/docker-compose.yml pull || true
+    ${COMPOSE} -f /opt/elk/docker-compose.yml up -d
   args:
     executable: /bin/bash
 
-# -------------------------------------------------------
-# Wait for Logstash port
-# -------------------------------------------------------
-
-- name: Wait for Logstash Beats port
+- name: Wait for Logstash Beats port to be listening (5044)
   wait_for:
-    port: 5044
     host: 127.0.0.1
-    delay: 5
-    timeout: 60
-
-# -------------------------------------------------------
-# Show running containers
-# -------------------------------------------------------
+    port: 5044
+    timeout: 120
+    state: started
 
 - name: Show running containers
-  shell: docker ps
+  shell: docker ps --format '{{ "{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' }}'
   register: docker_ps
+  changed_when: false
 
 - debug:
     var: docker_ps.stdout_lines
