@@ -1,78 +1,117 @@
-<group name="auditd,custom,post_exploit">
+<rules>
 
-  <!-- Reverse Shell using /dev/tcp or bash -c -->
+  <!-- Reverse Shell Detection -->
   <rule id="110100" level="10">
-    <if_sid>80700</if_sid>
-    <description>Auditd - Potential reverse shell via bash -c</description>
+    <description>Potential reverse shell via bash -c</description>
     <match>bash -c</match>
   </rule>
 
   <rule id="111001" level="10">
-    <if_sid>80700</if_sid>
-    <description>Auditd - Reverse shell pattern using /dev/tcp</description>
+    <description>Reverse shell pattern using /dev/tcp</description>
     <match>/dev/tcp</match>
   </rule>
 
-  <!-- SSH Key Persistence -->
-  <rule id="110101" level="10">
-    <if_sid>80700</if_sid>
-    <description>Auditd - SSH authorized_keys modified (possible persistence)</description>
+  <rule id="111002" level="10">
+    <description>Reverse shell using nc</description>
+    <regex>nc\s+-e</regex>
+  </rule>
+
+  <rule id="111003" level="10">
+    <description>Reverse shell using python</description>
+    <regex>python.*socket</regex>
+  </rule>
+
+  <!-- SSH Persistence -->
+  <rule id="110101" level="9">
+    <description>SSH authorized_keys modified possible persistence</description>
     <match>authorized_keys</match>
   </rule>
 
-  <!-- /tmp Execution -->
+  <!-- Execution from tmp -->
   <rule id="110102" level="8">
-    <if_sid>80700</if_sid>
-    <description>Auditd - Execution from /tmp directory</description>
+    <description>Execution from tmp directory</description>
     <match>/tmp/</match>
   </rule>
 
   <rule id="111021" level="8">
-    <if_sid>80700</if_sid>
-    <description>Auditd - Regex match for /tmp path</description>
+    <description>Regex match for tmp path</description>
     <regex>/tmp/.*</regex>
   </rule>
 
-  <!-- SUID Escalation - find -->
+  <!-- Privilege escalation tools -->
   <rule id="110103" level="9">
-    <if_sid>80700</if_sid>
-    <description>Auditd - find executed (potential privilege escalation)</description>
+    <description>find executed possible privilege escalation</description>
     <match>find</match>
   </rule>
 
-  <!-- SUID Escalation - nmap -->
   <rule id="110104" level="9">
-    <if_sid>80700</if_sid>
-    <description>Auditd - nmap executed (possible SUID misuse)</description>
+    <description>nmap executed possible SUID misuse</description>
     <match>nmap</match>
   </rule>
 
-  <!-- SUID Escalation - bash -->
   <rule id="110105" level="9">
-    <if_sid>80700</if_sid>
-    <description>Auditd - bash executed from SUID context</description>
+    <description>bash executed from privileged context</description>
     <match>/bin/bash</match>
   </rule>
 
-  <!-- Exfiltration via SCP -->
+  <!-- Data exfiltration -->
   <rule id="110106" level="9">
-    <if_sid>80700</if_sid>
-    <description>Auditd - SCP command used (possible data exfiltration)</description>
+    <description>SCP command used possible data exfiltration</description>
     <match>scp</match>
   </rule>
 
-  <!-- MySQL Root Access -->
-  <rule id="110107" level="8">
-    <if_sid>80700</if_sid>
-    <description>Auditd - MySQL client launched (check for root login)</description>
+  <rule id="110107" level="9">
+    <description>rsync command used possible data exfiltration</description>
+    <match>rsync</match>
+  </rule>
+
+  <rule id="110108" level="9">
+    <description>wget command used possible data download</description>
+    <match>wget</match>
+  </rule>
+
+  <rule id="110109" level="9">
+    <description>curl command used possible data download</description>
+    <match>curl</match>
+  </rule>
+
+  <!-- Database access -->
+  <rule id="110110" level="8">
+    <description>MySQL client launched</description>
     <match>mysql</match>
   </rule>
 
-  <rule id="111071" level="8">
-    <if_sid>80700</if_sid>
-    <description>Auditd - MySQL root login attempt via command args</description>
+  <rule id="111071" level="9">
+    <description>MySQL root login attempt</description>
     <regex>mysql\s+-u\s*root</regex>
   </rule>
 
-</group>
+  <!-- Suspicious network tools -->
+  <rule id="110111" level="8">
+    <description>netcat usage detected</description>
+    <match>nc </match>
+  </rule>
 
+  <rule id="110112" level="8">
+    <description>telnet command executed</description>
+    <match>telnet</match>
+  </rule>
+
+  <!-- File discovery -->
+  <rule id="110113" level="7">
+    <description>Searching sensitive files</description>
+    <regex>find\s+.*(shadow|passwd|id_rsa)</regex>
+  </rule>
+
+  <!-- Privilege escalation -->
+  <rule id="110114" level="9">
+    <description>sudo usage detected</description>
+    <match>sudo</match>
+  </rule>
+
+  <rule id="110115" level="10">
+    <description>Attempt to spawn root shell</description>
+    <regex>sudo\s+su</regex>
+  </rule>
+
+</rules>
