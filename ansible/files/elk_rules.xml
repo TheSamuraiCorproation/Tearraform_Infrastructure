@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <group name="auditd,custom,post_exploit">
 
   <!-- Reverse Shell using /dev/tcp or bash -c -->
