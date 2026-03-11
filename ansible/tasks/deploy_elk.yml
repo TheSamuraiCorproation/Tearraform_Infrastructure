@@ -1,6 +1,10 @@
 ---
 # ansible/tasks/deploy_elk.yml
-# Included from install_tools.yml via include_tasks
+# Dedicated deploy logic for ELK container pulled from ECR
+
+# --------------------------------------------------
+# Variables
+# --------------------------------------------------
 
 - name: Set basic ELK variables
   set_fact:
@@ -16,7 +20,7 @@
     generated_pipeline_on_controller: "{{ playbook_dir }}/tmp/01-rules.conf"
 
 # --------------------------------------------------
-# Create directories
+# Create directories on EC2
 # --------------------------------------------------
 
 - name: Create ELK base directory
@@ -32,7 +36,7 @@
     mode: "0755"
 
 # --------------------------------------------------
-# Copy rules
+# Copy rules to EC2
 # --------------------------------------------------
 
 - name: Copy ELK rules to host
@@ -42,19 +46,25 @@
     mode: "0644"
 
 # --------------------------------------------------
-# Generate Logstash pipeline (on Jenkins controller)
+# Prepare tmp folder on Jenkins controller
 # --------------------------------------------------
 
 - name: Ensure tmp dir exists on controller
   delegate_to: localhost
   run_once: true
+  become: false
   file:
     path: "{{ playbook_dir }}/tmp"
     state: directory
     mode: "0755"
 
+# --------------------------------------------------
+# Generate Logstash pipeline from rules
+# --------------------------------------------------
+
 - name: Generate Logstash pipeline from rules
   delegate_to: localhost
+  run_once: true
   become: false
   shell: |
     python3 "{{ playbook_dir }}/files/generate_logstash_pipeline.py" \
@@ -85,7 +95,7 @@
     executable: /bin/bash
 
 # --------------------------------------------------
-# Pull image
+# Pull ELK image
 # --------------------------------------------------
 
 - name: Pull ELK image
@@ -94,7 +104,7 @@
     executable: /bin/bash
 
 # --------------------------------------------------
-# Remove old container
+# Remove old container if exists
 # --------------------------------------------------
 
 - name: Remove old ELK container
@@ -107,7 +117,7 @@
   ignore_errors: true
 
 # --------------------------------------------------
-# Run container
+# Run ELK container
 # --------------------------------------------------
 
 - name: Run ELK container
@@ -119,7 +129,7 @@
     executable: /bin/bash
 
 # --------------------------------------------------
-# Wait for Logstash
+# Wait for Logstash to start
 # --------------------------------------------------
 
 - name: Wait for Logstash port
