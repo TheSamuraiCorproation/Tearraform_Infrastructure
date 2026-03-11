@@ -1,6 +1,5 @@
 ---
 # ansible/tasks/deploy_elk.yml
-# Dedicated deploy logic for ELK container pulled from ECR
 
 # --------------------------------------------------
 # Variables
@@ -36,7 +35,7 @@
     mode: "0755"
 
 # --------------------------------------------------
-# Copy rules to EC2
+# Copy rules
 # --------------------------------------------------
 
 - name: Copy ELK rules to host
@@ -59,7 +58,7 @@
     mode: "0755"
 
 # --------------------------------------------------
-# Generate Logstash pipeline from rules
+# Generate Logstash pipeline
 # --------------------------------------------------
 
 - name: Generate Logstash pipeline from rules
@@ -74,7 +73,7 @@
     executable: /bin/bash
 
 # --------------------------------------------------
-# Copy generated pipeline to EC2
+# Copy generated pipeline
 # --------------------------------------------------
 
 - name: Copy generated Logstash pipeline
@@ -84,7 +83,7 @@
     mode: "0644"
 
 # --------------------------------------------------
-# Login to ECR
+# Login to AWS ECR
 # --------------------------------------------------
 
 - name: Login to AWS ECR
@@ -104,17 +103,14 @@
     executable: /bin/bash
 
 # --------------------------------------------------
-# Remove old container if exists
+# Remove old container safely
 # --------------------------------------------------
 
 - name: Remove old ELK container
   shell: |
-    if docker ps -a --format '{{.Names}}' | grep -q '^{{ container_name }}$'; then
-      docker rm -f {{ container_name }}
-    fi
+    docker rm -f {{ container_name }} 2>/dev/null || true
   args:
     executable: /bin/bash
-  ignore_errors: true
 
 # --------------------------------------------------
 # Run ELK container
@@ -129,21 +125,19 @@
     executable: /bin/bash
 
 # --------------------------------------------------
-# Wait for Logstash to start
+# Wait for container to start
 # --------------------------------------------------
 
-- name: Wait for Logstash port
-  wait_for:
-    port: 5044
-    host: "{{ inventory_hostname }}"
-    timeout: 60
+- name: Wait a few seconds for Logstash
+  pause:
+    seconds: 15
 
 # --------------------------------------------------
-# Debug containers
+# Debug running containers
 # --------------------------------------------------
 
 - name: Show running containers
-  shell: docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}'
+  shell: docker ps --format '{{ "{{.Names}}" }}|{{ "{{.Image}}" }}|{{ "{{.Status}}" }}'
   register: docker_ps
   changed_when: false
 
