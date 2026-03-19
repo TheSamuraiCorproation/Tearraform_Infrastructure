@@ -36,11 +36,19 @@ def ec2_diagram(lines, payload):
         lines.append(f"ANS --> {node_id}")
 
         # Tools
-        tools = inst.get("tools_to_install", [])
-        if tools:
-            tool_node = f"{node_id}_TOOLS"
-            lines.append(f'{tool_node}["Installed Tools<br/>{", ".join(tools)}"]')
-            lines.append(f"{node_id} --> {tool_node}")
+
+	tools = inst.get("tools_to_install", [])
+	if tools:
+	    tool_node = f"{node_id}_TOOLS"
+
+	    # Extract tool names safely
+	    tool_names = [tool.get("name", "unknown") for tool in tools]
+
+	    # Better display (multi-line in Mermaid)
+	    tools_html = "<br/>".join(tool_names)
+
+	    lines.append(f'{tool_node}["Installed Tools<br/>{tools_html}"]')
+	    lines.append(f"{node_id} --> {tool_node}")
 
     lines.append("end")
     lines.append("")
