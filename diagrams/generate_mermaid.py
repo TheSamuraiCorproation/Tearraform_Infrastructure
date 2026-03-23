@@ -2,6 +2,7 @@ import json
 import argparse
 from datetime import datetime, UTC
 
+
 def header(lines):
     lines.extend([
         "flowchart TB",
@@ -19,6 +20,7 @@ def header(lines):
         ""
     ])
 
+
 def ec2_diagram(lines, payload):
     lines.append("subgraph AWS_EC2 [AWS EC2 Lab]")
 
@@ -35,23 +37,17 @@ def ec2_diagram(lines, payload):
         lines.append(f'{node_id}["{label}"]')
         lines.append(f"ANS --> {node_id}")
 
-        # Tools
-
-	tools = inst.get("tools_to_install", [])
-	if tools:
-	    tool_node = f"{node_id}_TOOLS"
-
-	    # Extract tool names safely
-	    tool_names = [tool.get("name", "unknown") for tool in tools]
-
-	    # Better display (multi-line in Mermaid)
-	    tools_html = "<br/>".join(tool_names)
-
-	    lines.append(f'{tool_node}["Installed Tools<br/>{tools_html}"]')
-	    lines.append(f"{node_id} --> {tool_node}")
+        tools = inst.get("tools_to_install", [])
+        if tools:
+            tool_node = f"{node_id}_TOOLS"
+            tool_names = [tool.get("name", "unknown") for tool in tools]
+            tools_html = "<br/>".join(tool_names)
+            lines.append(f'{tool_node}["Installed Tools<br/>{tools_html}"]')
+            lines.append(f"{node_id} --> {tool_node}")
 
     lines.append("end")
     lines.append("")
+
 
 def eks_diagram(lines, payload):
     lines.append("subgraph AWS_EKS [AWS EKS Lab]")
@@ -60,9 +56,11 @@ def eks_diagram(lines, payload):
     lines.append("end")
     lines.append("")
 
+
 def footer(lines):
     ts = datetime.now(UTC).isoformat()
     lines.append(f'NOTE["Generated automatically<br/>{ts}"]')
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -87,6 +85,7 @@ def main():
         f.write("\n".join(lines))
 
     print("[OK] Mermaid diagram generated")
+
 
 if __name__ == "__main__":
     main()
