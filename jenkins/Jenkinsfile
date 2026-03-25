@@ -9,6 +9,7 @@ pipeline {
     environment {
         AWS_DEFAULT_REGION = 'eu-central-1'
         TIMESTAMP = "${new Date().format('yyyyMMdd_HHmmss')}"
+        OUTPUT_BUCKET = 'ip-test-bucket-1774355639'
     }
 
     stages {
@@ -156,7 +157,22 @@ stage('Install Tools on EC2 (Ansible)') {
         def ip = sh(script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
 
         echo "🖥 EC2 instance IP: ${ip}"
-
+        // === NEW ADDITION ===
+        def attackJson = [
+            user_name: payload.user_name,
+            client_email: payload.client_email,
+            instance_name: instance_name,
+            ip_address: ip
+        ]
+        
+        // Write JSON locally
+        writeJSON file: 'attack_config.json', json: attackJson, pretty: 4
+        
+        // Upload to OUTPUT_BUCKET
+        sh """
+        aws s3 cp attack_config.json s3://${OUTPUT_BUCKET}/attack-configs/attack_config_${env.BUILD_ID}.json
+        """
+        echo "Attack JSON uploaded to S3: ${OUTPUT_BUCKET}"
         // write inventory (unchanged)
         writeFile file: 'inventory.ini', text: """
 [ec2]
