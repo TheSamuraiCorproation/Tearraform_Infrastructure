@@ -34,10 +34,24 @@ __pycache__/
 **/.key
 secrets.txt
 
+# Extra sensitive files specific to this repo
+aws-client-access-key.pub
+local-client-access-key.pub
+temp.pub
+test_ec2.json
+test_eks.json
+check.json
+payloads/eks-sample.json
+golden-ami/
+
+# ────────────────────────────────
+# Helm / monitoring
+# ────────────────────────────────
+helm/monitoring/.helmignore
+
 # ────────────────────────────────
 # IDE / editors
 # ────────────────────────────────
 .vscode/
 .idea/
 *.swp
-
