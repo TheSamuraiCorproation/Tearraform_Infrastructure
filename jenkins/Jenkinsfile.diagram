@@ -73,34 +73,34 @@ pipeline {
     }
 
     stage('Render Diagram (High Quality)') {
-      steps {
-        sh '''
-          set -e
+  steps {
+    sh '''
+      set -e
 
-          echo "🔍 Checking dependencies..."
-          which mmdc || { echo "❌ mmdc not found"; exit 1; }
-          ls -l $PUPPETEER_EXECUTABLE_PATH || { echo "❌ Chrome wrapper missing"; exit 1; }
+      echo "🔍 Checking dependencies..."
+      which mmdc || { echo "❌ mmdc not found"; exit 1; }
+      ls -l $PUPPETEER_EXECUTABLE_PATH || { echo "❌ Chrome wrapper missing"; exit 1; }
 
-          echo "🎨 Rendering SVG"
-          mmdc \
-            -i $DIAGRAM_DIR/lab.mmd \
-            -o $DIAGRAM_DIR/lab.svg \
-            --backgroundColor white \
-            --scale 1
+      echo "🎨 Rendering SVG"
+      mmdc \
+        -i $DIAGRAM_DIR/lab.mmd \
+        -o $DIAGRAM_DIR/lab.svg \
+        --backgroundColor white \
+        --scale 1
 
-          echo "🖼️ Rendering PNG (ULTRA HD)"
-          mmdc \
-            -i $DIAGRAM_DIR/lab.mmd \
-            -o $DIAGRAM_DIR/lab.png \
-            --backgroundColor white \
-            --scale 4 \
-            -w 4000
+      echo "🖼️ Rendering PNG (ULTRA HD)"
+      mmdc \
+        -i $DIAGRAM_DIR/lab.mmd \
+        -o $DIAGRAM_DIR/lab.png \
+        --backgroundColor white \
+        --scale 4 \
+        -w 5000
 
-          echo "📦 Files generated:"
-          ls -lh $DIAGRAM_DIR
-        '''
-      }
-    }
+      echo "📦 Files generated:"
+      ls -lh $DIAGRAM_DIR
+    '''
+  }
+}
 
   }
 
