@@ -7,8 +7,9 @@ pipeline {
   }
 
   environment {
-    PUPPETEER_EXECUTABLE_PATH = '/usr/bin/chromium-browser'
+    PUPPETEER_EXECUTABLE_PATH = '/usr/local/bin/chrome-headless-wrapper'
     PUPPETEER_SKIP_DOWNLOAD   = 'true'
+    DIAGRAM_DIR = 'diagram-output'
   }
 
   stages {
@@ -17,8 +18,6 @@ pipeline {
       steps {
         checkout([$class: 'GitSCM',
           branches: [[name: '*/main']],
-          doGenerateSubmoduleConfigurations: false,
-          extensions: [],
           userRemoteConfigs: [[
             url: 'https://github.com/NasriMohamedHedi/terraform-infra.git',
             credentialsId: 'github-pat'
@@ -30,8 +29,9 @@ pipeline {
     stage('Prepare workspace') {
       steps {
         sh '''
-          rm -rf diagram-output
-          mkdir -p diagram-output
+          set -e
+          rm -rf $DIAGRAM_DIR
+          mkdir -p $DIAGRAM_DIR
         '''
       }
     }
@@ -45,10 +45,13 @@ pipeline {
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
           sh '''
+            set -e
+
             echo "⬇️ Downloading payload from s3://${S3_BUCKET}/${S3_KEY}"
-            aws s3 cp s3://${S3_BUCKET}/${S3_KEY} diagram-output/payload.json
-            echo "📄 Payload content:"
-            cat diagram-output/payload.json
+            aws s3 cp s3://${S3_BUCKET}/${S3_KEY} $DIAGRAM_DIR/payload.json
+
+            echo "📄 Payload preview:"
+            cat $DIAGRAM_DIR/payload.json | head -n 50
           '''
         }
       }
@@ -57,33 +60,47 @@ pipeline {
     stage('Generate Mermaid (.mmd)') {
       steps {
         sh '''
-          python3 diagrams/generate_mermaid.py \
-            --payload diagram-output/payload.json \
-            --out diagram-output/lab.mmd
+          set -e
 
-          echo "📐 Mermaid file:"
-          sed -n '1,200p' diagram-output/lab.mmd
+          echo "🧠 Generating Mermaid diagram..."
+          python3 diagrams/generate_mermaid.py \
+            --payload $DIAGRAM_DIR/payload.json \
+            --out $DIAGRAM_DIR/lab.mmd
+
+          echo "📐 Mermaid preview:"
+          sed -n '1,120p' $DIAGRAM_DIR/lab.mmd
         '''
       }
     }
 
-    stage('Render Diagram (PNG + SVG)') {
+    stage('Render Diagram (High Quality)') {
       steps {
         sh '''
           set -e
 
-          echo "🔍 Debug"
-          which mmdc
-          ls -l /usr/local/bin/chrome-headless-wrapper
+          echo "🔍 Checking dependencies..."
+          which mmdc || { echo "❌ mmdc not found"; exit 1; }
+          ls -l $PUPPETEER_EXECUTABLE_PATH || { echo "❌ Chrome wrapper missing"; exit 1; }
 
-          export PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chrome-headless-wrapper
-          export PUPPETEER_SKIP_DOWNLOAD=true
+          echo "🎨 Rendering SVG "
+          mmdc \
+            -i $DIAGRAM_DIR/lab.mmd \
+            -o $DIAGRAM_DIR/lab.svg \
+            --backgroundColor white \
+            --theme base \
+            --scale 1
 
-          echo "🚀 Rendering PNG"
-          mmdc -i diagram-output/lab.mmd -o diagram-output/lab.png
+          echo "🖼️ Rendering PNG (ULTRA HD)"
+          mmdc \
+            -i $DIAGRAM_DIR/lab.mmd \
+            -o $DIAGRAM_DIR/lab.png \
+            --backgroundColor white \
+            --theme base \
+            --scale 4 \
+            -w 4000
 
-          echo "🚀 Rendering SVG"
-          mmdc -i diagram-output/lab.mmd -o diagram-output/lab.svg
+          echo "📦 Files generated:"
+          ls -lh $DIAGRAM_DIR
         '''
       }
     }
@@ -91,12 +108,27 @@ pipeline {
   }
 
   post {
+
     success {
       archiveArtifacts artifacts: 'diagram-output/*', fingerprint: true
+
       echo "✅ Diagram generated successfully"
+      echo "📊 SVG = clean (docs)"
+      echo "🖼️ PNG = high resolution (presentations)"
     }
+
     failure {
       echo "❌ Diagram generation failed"
+
+      sh '''
+        echo "🔎 Debug info:"
+        ls -l
+        ls -l diagram-output || true
+      '''
+    }
+
+    always {
+      echo "🏁 Pipeline finished"
     }
   }
 }
