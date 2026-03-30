@@ -155,6 +155,7 @@ stage('Install Tools on EC2 (Ansible)') {
         def payload = readJSON file: 'payload.json'
         def instance_name = payload.instances.keySet()[0]
         def ip = sh(script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
+        def instance_id = sh(script: "terraform output -json ec2_instance_ids | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
 
         echo "🖥 EC2 instance IP: ${ip}"
         // === NEW ADDITION ===
@@ -162,6 +163,7 @@ stage('Install Tools on EC2 (Ansible)') {
             user_name: payload.user_name,
             client_email: payload.client_email,
             instance_name: instance_name,
+            instance_id: instance_id,
             ip_address: ip,
             attacks: payload.attacks ?: []
         ]
