@@ -165,7 +165,8 @@ stage('Install Tools on EC2 (Ansible)') {
             instance_name: instance_name,
             instance_id: instance_id,
             ip_address: ip,
-            attacks: payload.attacks ?: []
+            attacks: payload.attacks ?: [],
+            tools: payload.instances[instance_name].tools_to_install ?: []
         ]
         
         // Write JSON locally
