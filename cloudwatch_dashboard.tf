@@ -4,122 +4,38 @@ resource "aws_cloudwatch_dashboard" "ec2_dashboard" {
   dashboard_body = jsonencode({
     widgets = [
       {
-        type   = "text"
-        x      = 0
-        y      = 0
-        width  = 24
-        height = 2
-
+        type = "metric"
+        x = 0
+        y = 0
+        width = 12
+        height = 6
         properties = {
-          markdown = <<-MD
-          # EC2 Lab Monitoring
-          Namespace: `EC2/LabMonitoring`
-          MD
+          metrics = [
+            ["AWS/EC2", "CPUUtilization", "InstanceId", "${aws_instance.this["DEMO-vm"].id}"],
+            ["AWS/EC2", "NetworkIn", "InstanceId", "${aws_instance.this["DEMO-vm"].id}"],
+            ["AWS/EC2", "NetworkOut", "InstanceId", "${aws_instance.this["DEMO-vm"].id}"]
+          ]
+          period = 300
+          stat = "Average"
+          region = var.aws_region
+          title = "EC2 CPU & Network"
         }
       },
-
       {
-        type   = "metric"
-        x      = 0
-        y      = 2
-        width  = 12
+        type = "metric"
+        x = 0
+        y = 6
+        width = 12
         height = 6
-
         properties = {
-          title     = "CPU Usage"
-          region    = var.aws_region
-          period    = 60
-          stat      = "Average"
-          view      = "timeSeries"
-          liveData  = true
-          stacked   = false
           metrics = [
-            {
-              expression = "SEARCH('{EC2/LabMonitoring,InstanceId} MetricName=\"cpu_usage_user\"', 'Average', 60)"
-              id         = "e1"
-              label      = "cpu_usage_user"
-            }
+            ["AWS/EC2", "DiskReadBytes", "InstanceId", "${aws_instance.this["DEMO-vm"].id}"],
+            ["AWS/EC2", "DiskWriteBytes", "InstanceId", "${aws_instance.this["DEMO-vm"].id}"]
           ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 12
-        y      = 2
-        width  = 12
-        height = 6
-
-        properties = {
-          title     = "Memory Usage (%)"
-          region    = var.aws_region
-          period    = 60
-          stat      = "Average"
-          view      = "timeSeries"
-          liveData  = true
-          stacked   = false
-          metrics = [
-            {
-              expression = "SEARCH('{EC2/LabMonitoring,InstanceId} MetricName=\"mem_used_percent\"', 'Average', 60)"
-              id         = "e2"
-              label      = "mem_used_percent"
-            }
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 0
-        y      = 8
-        width  = 12
-        height = 6
-
-        properties = {
-          title     = "Disk Usage (%)"
-          region    = var.aws_region
-          period    = 60
-          stat      = "Average"
-          view      = "timeSeries"
-          liveData  = true
-          stacked   = false
-          metrics = [
-            {
-              expression = "SEARCH('{EC2/LabMonitoring,InstanceId} MetricName=\"used_percent\"', 'Average', 60)"
-              id         = "e3"
-              label      = "used_percent"
-            }
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 12
-        y      = 8
-        width  = 12
-        height = 6
-
-        properties = {
-          title     = "Network Traffic"
-          region    = var.aws_region
-          period    = 60
-          stat      = "Sum"
-          view      = "timeSeries"
-          liveData  = true
-          stacked   = false
-          metrics = [
-            {
-              expression = "SEARCH('{EC2/LabMonitoring,InstanceId} MetricName=\"bytes_recv\"', 'Sum', 60)"
-              id         = "e4"
-              label      = "bytes_recv"
-            },
-            {
-              expression = "SEARCH('{EC2/LabMonitoring,InstanceId} MetricName=\"bytes_sent\"', 'Sum', 60)"
-              id         = "e5"
-              label      = "bytes_sent"
-            }
-          ]
+          period = 300
+          stat = "Sum"
+          region = var.aws_region
+          title = "EC2 Disk I/O"
         }
       }
     ]
