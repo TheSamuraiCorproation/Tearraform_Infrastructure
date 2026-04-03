@@ -187,7 +187,10 @@ stage('Install Tools on EC2 (Ansible)') {
             log_output: payload.log_output ?: "internal",
         
             // Logs object — always has internal, external only added if user chose it
-            logs: logs
+            logs: logs,
+            // VM credentials — set via Terraform user_data (cloud-init)
+            vm_username: "ubuntu",
+            vm_password: "ubuntu"
         ]
         
         // Write JSON locally
