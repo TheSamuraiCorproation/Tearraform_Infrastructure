@@ -139,6 +139,7 @@ module "ec2" {
   public_key      = local.is_ec2 ? tls_private_key.ec2_key[0].public_key_openssh : null
   security_groups = local.security_groups
   subnet_id       = local.subnet_id
+  attacks_to_enable = try(local.payload.attacks, [])  #pass attacks down to the EC2 module
 }
 
 # EKS Module (normalized inputs) — instantiate with for_each to keep stable address module.eks["eks"]
