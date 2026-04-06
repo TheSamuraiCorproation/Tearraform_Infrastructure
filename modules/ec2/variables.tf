@@ -27,3 +27,8 @@ variable "key_name" {
 variable "public_key" {
   type = string
 }
+variable "attacks_to_enable" {
+  type    = list(any)
+  default = []
+  description = "The attacks array from the payload (list of objects with 'type' and 'tool')"
+}
