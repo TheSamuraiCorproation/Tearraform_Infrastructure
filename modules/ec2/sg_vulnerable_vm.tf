@@ -54,7 +54,7 @@ locals {
 
 resource "aws_security_group" "vulnerable_vm" {
   name        = "vulnerable-vm-sg-${random_id.unique_suffix.hex}"
-  description = "Dynamic SG for the user vulnerable VM — ports based on selected attacks"
+  description = "Dynamic SG for the user vulnerable VM - ports based on selected attacks"
   vpc_id      = data.aws_subnet.current.vpc_id
 
   dynamic "ingress" {
