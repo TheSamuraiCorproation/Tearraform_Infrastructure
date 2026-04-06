@@ -20,20 +20,20 @@ locals {
     { port = 443, protocol = "tcp", description = "HTTPS" },
   ]
 
-  # Map: tool name (from attacks[].tool in payload) → ports to open
+  # Map: tool name (from attacks[].tool in payload) -> ports to open
   tool_port_map = {
-    "nmap"      = [{ port = 22,   protocol = "tcp", description = "SSH for nmap"       }]
-    "nikto"     = [{ port = 3000, protocol = "tcp", description = "Vulnerable web app" }]
-    "metasploit"= [{ port = 3389, protocol = "tcp", description = "RDP"                },
-                   { port = 445,  protocol = "tcp", description = "SMB"                }]
-    "sqlmap"    = [{ port = 3306, protocol = "tcp", description = "MySQL"              }]
-    "hydra"     = [{ port = 22,   protocol = "tcp", description = "SSH brute force"    },
-                   { port = 3306, protocol = "tcp", description = "MySQL brute force"  }]
-    "smtp_tool" = [{ port = 25,   protocol = "tcp", description = "SMTP"               }]
-    "dns_tool"  = [{ port = 53,   protocol = "tcp", description = "DNS TCP"            },
-                   { port = 53,   protocol = "udp", description = "DNS UDP"            }]
-    "rdp_tool"  = [{ port = 3389, protocol = "tcp", description = "RDP"               }]
-    "syslog"    = [{ port = 514,  protocol = "udp", description = "Syslog UDP"        }]
+    "nmap"       = [{ port = 22,   protocol = "tcp", description = "SSH for nmap"       }]
+    "nikto"      = [{ port = 3000, protocol = "tcp", description = "Vulnerable web app" }]
+    "metasploit" = [{ port = 3389, protocol = "tcp", description = "RDP"                },
+                    { port = 445,  protocol = "tcp", description = "SMB"                }]
+    "sqlmap"     = [{ port = 3306, protocol = "tcp", description = "MySQL"              }]
+    "hydra"      = [{ port = 22,   protocol = "tcp", description = "SSH brute force"    },
+                    { port = 3306, protocol = "tcp", description = "MySQL brute force"  }]
+    "smtp_tool"  = [{ port = 25,   protocol = "tcp", description = "SMTP"               }]
+    "dns_tool"   = [{ port = 53,   protocol = "tcp", description = "DNS TCP"            },
+                    { port = 53,   protocol = "udp", description = "DNS UDP"            }]
+    "rdp_tool"   = [{ port = 3389, protocol = "tcp", description = "RDP"               }]
+    "syslog"     = [{ port = 514,  protocol = "udp", description = "Syslog UDP"        }]
   }
 
   # Extract tool names from the attacks array (attacks[].tool)
@@ -53,6 +53,7 @@ locals {
     for rule in concat(local.always_open_ports, local.conditional_ports) :
     "${rule.port}-${rule.protocol}" => rule
   })
+}                                           # <-- this was missing
 
 resource "aws_security_group" "vulnerable_vm" {
   name        = "vulnerable-vm-sg-${random_id.unique_suffix.hex}"
