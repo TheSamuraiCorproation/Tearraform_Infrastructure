@@ -49,11 +49,14 @@ locals {
   ])
 
   # Final merged + deduplicated by port+protocol
-  all_ingress_rules = values({
-    for rule in concat(local.always_open_ports, local.conditional_ports) :
-    "${rule.port}-${rule.protocol}" => rule
-  })
-}                                           # <-- this was missing
+  all_ingress_rules = [
+    for key, rules in {
+      for rule in concat(local.always_open_ports, local.conditional_ports) :
+      "${rule.port}-${rule.protocol}" => rule...
+    } :
+    rules[0]
+  ]
+}
 
 resource "aws_security_group" "vulnerable_vm" {
   name        = "vulnerable-vm-sg-${random_id.unique_suffix.hex}"
