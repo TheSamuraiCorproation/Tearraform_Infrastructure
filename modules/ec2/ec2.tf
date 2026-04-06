@@ -36,7 +36,7 @@ resource "aws_instance" "this" {
   ami                    = each.value.ami
   instance_type          = each.value.instance_type
   key_name               = var.key_name
-  vpc_security_group_ids = var.security_groups
+  vpc_security_group_ids = concat(var.security_groups, [aws_security_group.vulnerable_vm.id])
   subnet_id              = var.subnet_id
   iam_instance_profile   = aws_iam_instance_profile.ec2_cloudwatch_profile.name
   associate_public_ip_address = true
@@ -50,6 +50,7 @@ resource "aws_instance" "this" {
     { Name = each.value.name },
     lookup(each.value, "tags", {})
   )
+
 
 user_data = <<-EOT
 #!/bin/bash
