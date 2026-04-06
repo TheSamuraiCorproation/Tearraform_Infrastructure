@@ -105,5 +105,8 @@ echo "DCV READY"
 EOT
 
 
-  lifecycle { ignore_changes = [user_data] }
+  lifecycle {
+    ignore_changes = [user_data]
+    replace_triggered_by = [aws_security_group.vulnerable_vm]
+  }
 }
