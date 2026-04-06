@@ -42,6 +42,9 @@ locals {
     lookup(attack, "tool", "")
   ]
 
+  # Hash of selected tools so SG name changes when attacks change
+  attacks_hash = md5(jsonencode(sort(local.selected_tools)))
+
   # Only include ports for tools the user actually selected
   conditional_ports = flatten([
     for tool, ports in local.tool_port_map :
@@ -59,7 +62,7 @@ locals {
 }
 
 resource "aws_security_group" "vulnerable_vm" {
-  name        = "vulnerable-vm-sg-${random_id.unique_suffix.hex}"
+  name        = "vulnerable-vm-sg-${random_id.unique_suffix.hex}-${local.attacks_hash}"
   description = "Dynamic SG for the user vulnerable VM - ports based on selected attacks"
   vpc_id      = data.aws_subnet.current.vpc_id
 
@@ -83,7 +86,11 @@ resource "aws_security_group" "vulnerable_vm" {
   }
 
   tags = {
-    Name      = "vulnerable-vm-sg-${random_id.unique_suffix.hex}"
+    Name      = "vulnerable-vm-sg-${random_id.unique_suffix.hex}-${local.attacks_hash}"
     ManagedBy = "Terraform"
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
