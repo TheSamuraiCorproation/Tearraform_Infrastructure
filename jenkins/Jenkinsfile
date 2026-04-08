@@ -168,6 +168,9 @@ stage('Install Tools on EC2 (Ansible)') {
         
         // Build the 2nd JSON that will be consumed by the Kali attacking VM
         def attackJson = [
+            // Unique identifier for this lab instance
+            lab_id: "lab-${instance_id}-${env.BUILD_ID}",
+            
             // User info passed from the 1st JSON
             user_name: payload.user_name,
             client_email: payload.client_email,
