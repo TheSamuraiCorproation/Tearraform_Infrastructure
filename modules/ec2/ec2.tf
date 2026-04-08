@@ -101,6 +101,13 @@ dcv create-session desktop --owner ubuntu || true
 ### -------------------------
 systemctl enable dcvserver
 
+### -------------------------
+### 7. Enable SSH password authentication
+### -------------------------
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^#\?KbdInteractiveAuthentication.*/KbdInteractiveAuthentication yes/' /etc/ssh/sshd_config
+systemctl restart ssh
+
 echo "DCV READY"
 EOT
 
