@@ -87,7 +87,13 @@ pipeline {
                         def payload = readJSON file: 'payload.json'
                         if (payload.service_type) {
                             sh "cp backends/backend-${payload.service_type}.tf backend.tf || echo 'No backend file for ${payload.service_type}'"
-                            sh "terraform init -reconfigure -upgrade -input=false"
+                            sh """
+                                terraform init \
+                                  -reconfigure \
+                                  -upgrade \
+                                  -input=false \
+                                  -backend-config="key=labs/${env.BUILD_ID}/terraform.tfstate"
+                            """
                         }
                     }
                 }
