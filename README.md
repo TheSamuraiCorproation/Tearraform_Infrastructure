@@ -1,4 +1,4 @@
-# Cybersecurity Training Platform — Infrastructure
+# DOJO Cybersecurity Platform — Infrastructure
 
 This repository contains the Infrastructure as Code (IaC) for the DOJO cybersecurity platform. It provisions vulnerable virtual machines (labs) for users to practice real-world attack scenarios in an isolated AWS environment depending on their use case.
 
