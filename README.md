@@ -62,8 +62,8 @@ Uploaded to S3 to trigger the Jenkins pipeline. Contains everything needed to pr
 ```json
 {
   "file_name": "test_lab_1234567890",
-  "user_name": "Mohamed Hedi Nasri",
-  "client_email": "mnasri@thesamurai.com",
+  "user_name": "Name of the user",
+  "client_email": "Email of the user",
   "service_type": "ec2",
   "log_output": "internal",
   "logs": {
@@ -77,7 +77,7 @@ Uploaded to S3 to trigger the Jenkins pipeline. Contains everything needed to pr
   ],
   "instances": {
     "DEMO-vm": {
-      "name": "NICE-VM",
+      "name": "custom-vm-name",
       "ami": "ami-0ac35e575a87fd5d5",
       "instance_type": "t3.xlarge",
       "security_groups": ["sg-0d1e97a685dc65bd9"],
@@ -90,7 +90,7 @@ Uploaded to S3 to trigger the Jenkins pipeline. Contains everything needed to pr
           "run_args": "--cap-add=NET_ADMIN --cap-add=NET_RAW --network host -v /var/log/suricata:/var/log/suricata"
         }
       ],
-      "tags": { "Owner": "Mohamed Hedi Nasri" }
+      "tags": { "Owner": "Name of the user" }
     }
   }
 }
