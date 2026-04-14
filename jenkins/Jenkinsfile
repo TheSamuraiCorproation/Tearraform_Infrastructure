@@ -171,7 +171,9 @@ stage('Install Tools on EC2 (Ansible)') {
         // These are ECR containers that the attacks will target on the VM.
         // ---------------------------------------------------------------
         def attackTypes = payload.attacks.collect { it.type }.unique()
-
+withCredentials([
+  string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY')
+]) {
         // Map of attack type -> ECR containers needed on the vulnerable VM
         def attackServiceMap = [
           "ai": [
@@ -191,10 +193,17 @@ stage('Install Tools on EC2 (Ansible)') {
               name: "gemini-sandbox",
               ecr_repo_url: "430118831270.dkr.ecr.eu-central-1.amazonaws.com/gemini-sandbox",
               image_tag: "latest",
-              run_args: "-d --restart unless-stopped -p 8080:8080"
+              run_args: "-d --restart unless-stopped -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges",
+              env: [
+                GEMINI_API_KEY: "${GEMINI_API_KEY}",
+                GEMINI_MODEL: "gemini-2.5-flash",
+                GEMINI_TIMEOUT_SECONDS: "600"
+              ]
             ]
-          ],
-          "web": [
+
+          // os and network don't need any extra containers
+        ],
+        "web": [
             [
               name: "nextjs-mysql-app",
               ecr_repo_url: "430118831270.dkr.ecr.eu-central-1.amazonaws.com/nextjs-mysql-app",
@@ -202,9 +211,8 @@ stage('Install Tools on EC2 (Ansible)') {
               run_args: "-d --restart unless-stopped -p 3000:3000"
             ]
           ]
-          // os and network don't need any extra containers
-        ]
-
+     ]
+        }
         // Start with the tools the user explicitly chose in the payload
         def allTools = payload.instances[instance_name].tools_to_install ?: []
 
