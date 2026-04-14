@@ -164,106 +164,65 @@ stage('Install Tools on EC2 (Ansible)') {
         def instance_id = sh(script: "terraform output -json ec2_instance_ids | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
 
         echo "🖥 EC2 instance IP: ${ip}"
-
-        // ---------------------------------------------------------------
-        // Determine which attack target services need to be installed
-        // based on the attack types the user selected.
-        // These are ECR containers that the attacks will target on the VM.
-        // ---------------------------------------------------------------
-        def attackTypes = payload.attacks.collect { it.type }.unique()
-withCredentials([
-  string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY')
-]) {
-        // Map of attack type -> ECR containers needed on the vulnerable VM
-        def attackServiceMap = [
-          "ai": [
-            [
-              name: "bert-service",
-              ecr_repo_url: "430118831270.dkr.ecr.eu-central-1.amazonaws.com/bert-service",
-              image_tag: "latest",
-              run_args: "-d --restart unless-stopped -p 5001:5001"
-            ],
-            [
-              name: "crop-service",
-              ecr_repo_url: "430118831270.dkr.ecr.eu-central-1.amazonaws.com/crop-service",
-              image_tag: "latest",
-              run_args: "-d --restart unless-stopped -p 8001:8001"
-            ],
-            [
-              name: "gemini-sandbox",
-              ecr_repo_url: "430118831270.dkr.ecr.eu-central-1.amazonaws.com/gemini-sandbox",
-              image_tag: "latest",
-              run_args: "-d --restart unless-stopped -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges",
-              env: [
-                GEMINI_API_KEY: "${GEMINI_API_KEY}",
-                GEMINI_MODEL: "gemini-2.5-flash",
-                GEMINI_TIMEOUT_SECONDS: "600"
-              ]
-            ]
-
-          // os and network don't need any extra containers
-        ],
-        "web": [
-            [
-              name: "nextjs-mysql-app",
-              ecr_repo_url: "430118831270.dkr.ecr.eu-central-1.amazonaws.com/nextjs-mysql-app",
-              image_tag: "latest",
-              run_args: "-d --restart unless-stopped -p 3000:3000"
-            ]
-          ]
-     ]
-        }
-        // Start with the tools the user explicitly chose in the payload
-        def allTools = payload.instances[instance_name].tools_to_install ?: []
-
-        // Append attack target services based on selected attack types
-        attackTypes.each { type ->
-          if (attackServiceMap.containsKey(type)) {
-            allTools = allTools + attackServiceMap[type]
-          }
-        }
-
-        echo "🛠 Total tools to install: ${allTools.collect { it.name }}"
-
-        // Build logs object
+         // Build the logs object — internal is always included
         def logs = [internal: true]
+        
+        // If user chose external, pull the external logs config (ip + port) from the 1st JSON
         if (payload.log_output == "external") {
             logs.external = payload.logs.external
         }
-
-        // Build the 2nd JSON consumed by the Kali attacking VM
+        
+        // Build the 2nd JSON that will be consumed by the Kali attacking VM
         def attackJson = [
+            // Unique identifier for this lab instance
             lab_id: "lab-${instance_id}-${env.BUILD_ID}",
+            
+            // User info passed from the 1st JSON
             user_name: payload.user_name,
             client_email: payload.client_email,
+        
+            // Instance info retrieved after Terraform provisioning
             instance_name: instance_name,
             instance_id: instance_id,
             ip_address: ip,
+        
+            // Attacks the user selected on the platform
             attacks: payload.attacks ?: [],
-            tools: allTools,
+        
+            // Security tools installed on the vulnerable VM
+            tools: payload.instances[instance_name].tools_to_install ?: [],
+        
+            // Log visualization mode chosen by the user (internal or external)
             log_output: payload.log_output ?: "internal",
+        
+            // Logs object — always has internal, external only added if user chose it
             logs: logs,
+            // VM credentials — set via Terraform user_data (cloud-init)
             vm_username: "ubuntu",
             vm_password: "ubuntu"
         ]
-
+        
+        // Write JSON locally
         writeJSON file: 'attack_config.json', json: attackJson, pretty: 4
-
+        
+        // Upload to OUTPUT_BUCKET
         sh """
         aws s3 cp attack_config.json s3://${OUTPUT_BUCKET}/attack-configs/attack_config_${env.BUILD_ID}.json
         """
         echo "Attack JSON uploaded to S3: ${OUTPUT_BUCKET}"
-
+        // write inventory (unchanged)
         writeFile file: 'inventory.ini', text: """
 [ec2]
 ${ip} ansible_user=ubuntu ansible_ssh_private_key_file=client-access-key.pem
 """
 
-        // Pass the full merged tools list to Ansible
-        def tools_json = writeJSON returnText: true, json: allTools
+        def tools = payload.instances[instance_name].tools_to_install ?: []
+        def tools_json = writeJSON returnText: true, json: tools
 
+        // Ensure private key has correct permissions (should already be set earlier)
         sh "chmod 400 client-access-key.pem || true"
 
+        // Create a local known_hosts file for this workspace and add the host key (non-interactive)
         sh """
           mkdir -p "${WORKSPACE}/.ssh"
           echo "⏳ Scanning host key for ${ip}..."
@@ -271,6 +230,7 @@ ${ip} ansible_user=ubuntu ansible_ssh_private_key_file=client-access-key.pem
           echo "Known hosts file created at: ${WORKSPACE}/known_hosts"
         """
 
+        // Optional quick connectivity test (helps debug failures)
         def ok = sh(script: "ssh -o BatchMode=yes -o ConnectTimeout=8 -o UserKnownHostsFile=${WORKSPACE}/known_hosts -i client-access-key.pem ubuntu@${ip} 'echo SSH_OK' || echo SSH_FAIL", returnStdout: true).trim()
         echo "SSH test result: ${ok}"
 
@@ -279,9 +239,13 @@ ${ip} ansible_user=ubuntu ansible_ssh_private_key_file=client-access-key.pem
           echo "  • Instance not ready yet (EC2 cloud-init still running)."
           echo "  • Security group blocking port 22 from the Jenkins agent."
           echo "  • Wrong username/key (AMI expects another user)."
+          // show netcat test (if available) to verify port 22 is open
           sh "echo 'Checking TCP port 22...' ; (nc -z -v ${ip} 22 && echo 'PORT_OPEN') || echo 'PORT_CLOSED' || true"
+          // proceed anyway (ansible will show more logs), or uncomment the next line to fail early:
+          // error('SSH test failed — aborting Ansible run')
         }
 
+        // Run ansible-playbook but instruct Ansible to use the workspace known_hosts file
         withEnv([
           "ANSIBLE_HOST_KEY_CHECKING=True",
           "ANSIBLE_SSH_COMMON_ARGS=-o UserKnownHostsFile=${WORKSPACE}/known_hosts -o StrictHostKeyChecking=yes"
