@@ -1,8 +1,11 @@
 # ---------------------------------------------------------------
-# Fetch the pre-existing Kali VM to get its private IP
+# Fetch the pre-existing Kali VM to get its Elastic Public IP
 # ---------------------------------------------------------------
-data "aws_instance" "kali" {
-  instance_id = "i-0c2181477f34261e3"
+data "aws_eip" "kali" {
+  filter {
+    name   = "tag:Name"
+    values = ["kali-linux"]
+  }
 }
 
 # ---------------------------------------------------------------
@@ -106,7 +109,7 @@ resource "aws_security_group" "vulnerable_vm" {
 
       # Only the Kali machine (fetched via data source at top of file)
       # is allowed to reach the vulnerable VM ports
-      cidr_blocks = ["${data.aws_instance.kali.private_ip}/32"]
+      cidr_blocks = ["${data.aws_eip.kali.public_ip}/32"]
     }
   }
 
