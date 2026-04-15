@@ -25,6 +25,15 @@
     image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
     registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
     run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
+    # Build -e KEY=VALUE flags from the env object if present, otherwise empty string
+    env_flags: >-
+      {{
+        ecr.env | default({}) | dict2items
+        | map(attribute='key') | zip(ecr.env | default({}) | dict2items | map(attribute='value'))
+        | map('join', '=')
+        | map('regex_replace', '^(.*)$', '-e \1')
+        | join(' ')
+      }}
 
 - name: "Generic: Login to ECR (if no dedicated task)"
   ansible.builtin.shell: |
@@ -54,7 +63,7 @@
 - name: "Generic: Run container (if no dedicated task)"
   ansible.builtin.shell: |
     set -eux
-    docker run {{ run_args }} --name {{ container_name }} {{ image_full }}
+    docker run {{ run_args }} {{ env_flags }} --name {{ container_name }} {{ image_full }}
   args:
     executable: /bin/bash
   when: not dedicated_task_exists.stat.exists
