@@ -67,3 +67,16 @@
   args:
     executable: /bin/bash
   when: not dedicated_task_exists.stat.exists
+
+- name: "Generic: Verify container is running (if no dedicated task)"
+  ansible.builtin.shell: |
+    docker ps --filter "name={{ container_name }}" --format "{{.Names}} — {{.Status}}"
+  args:
+    executable: /bin/bash
+  register: container_status
+  when: not dedicated_task_exists.stat.exists
+
+- name: "Generic: Show container status (if no dedicated task)"
+  ansible.builtin.debug:
+    msg: "{{ container_status.stdout }}"
+  when: not dedicated_task_exists.stat.exists
