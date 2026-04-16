@@ -1,52 +1,31 @@
 ---
-# ansible/tasks/deploy_elk.yml
-
-# --------------------------------------------------
-# Variables
-# --------------------------------------------------
-
 - name: Set basic ELK variables
   set_fact:
     container_name: "{{ (ecr.name | default('elk')) | lower }}"
     image_full: "{{ ecr.ecr_repo_url }}:{{ ecr.image_tag | default('latest') }}"
     registry_host: "{{ ecr.ecr_repo_url.split('/')[0] }}"
-    run_args: "{{ ecr.run_args | default('-d --restart unless-stopped') }}"
     elk_base_dir: "/opt/elk"
 
 - name: Set pipeline variables
   set_fact:
     elk_pipeline_dir: "{{ elk_base_dir }}/pipeline"
-    generated_pipeline_on_controller: "{{ playbook_dir }}/tmp/01-rules.conf"
+    elk_rules_dir: "{{ elk_base_dir }}/rules"
 
-# --------------------------------------------------
-# Create directories on EC2
-# --------------------------------------------------
-
-- name: Create ELK base directory
+- name: Create ELK base directories
   file:
-    path: "{{ elk_base_dir }}"
+    path: "{{ item }}"
     state: directory
     mode: "0755"
+  loop:
+    - "{{ elk_base_dir }}"
+    - "{{ elk_pipeline_dir }}"
+    - "{{ elk_rules_dir }}"
 
-- name: Create pipeline directory
-  file:
-    path: "{{ elk_pipeline_dir }}"
-    state: directory
-    mode: "0755"
-
-# --------------------------------------------------
-# Copy rules
-# --------------------------------------------------
-
-- name: Copy ELK rules to host
+- name: Copy ELK rules XML to host
   copy:
     src: "files/elk_rules.xml"
-    dest: "{{ elk_pipeline_dir }}/elk_rules.xml"
+    dest: "{{ elk_rules_dir }}/elk_rules.xml"
     mode: "0644"
-
-# --------------------------------------------------
-# Prepare tmp folder on Jenkins controller
-# --------------------------------------------------
 
 - name: Ensure tmp dir exists on controller
   delegate_to: localhost
@@ -57,34 +36,48 @@
     state: directory
     mode: "0755"
 
-# --------------------------------------------------
-# Generate Logstash pipeline
-# --------------------------------------------------
-
 - name: Generate Logstash pipeline from rules
   delegate_to: localhost
   run_once: true
   become: false
   shell: |
     python3 "{{ playbook_dir }}/files/generate_logstash_pipeline.py" \
-    "{{ playbook_dir }}/files/elk_rules.xml" \
-    > "{{ generated_pipeline_on_controller }}"
+      "{{ playbook_dir }}/files/elk_rules.xml" \
+      > "{{ playbook_dir }}/tmp/01-rules.conf"
   args:
     executable: /bin/bash
 
-# --------------------------------------------------
-# Copy generated pipeline
-# --------------------------------------------------
+- name: Copy base Logstash pipeline
+  copy:
+    src: "files/00-input.conf"
+    dest: "{{ elk_pipeline_dir }}/00-input.conf"
+    mode: "0644"
 
 - name: Copy generated Logstash pipeline
   copy:
-    src: "{{ generated_pipeline_on_controller }}"
+    src: "{{ playbook_dir }}/tmp/01-rules.conf"
     dest: "{{ elk_pipeline_dir }}/01-rules.conf"
     mode: "0644"
 
-# --------------------------------------------------
-# Login to AWS ECR
-# --------------------------------------------------
+- name: Copy Logstash output pipeline
+  copy:
+    src: "files/99-output.conf"
+    dest: "{{ elk_pipeline_dir }}/99-output.conf"
+    mode: "0644"
+
+- name: Copy Filebeat config
+  copy:
+    src: "files/filebeat.yml"
+    dest: "{{ elk_base_dir }}/filebeat.yml"
+    mode: "0644"
+
+- name: Render docker compose file
+  template:
+    src: "templates/docker-compose.elk.j2"
+    dest: "{{ elk_base_dir }}/docker-compose.yml"
+    mode: "0644"
+  vars:
+    logstash_image: "{{ image_full }}"
 
 - name: Login to AWS ECR
   shell: |
@@ -93,48 +86,28 @@
   args:
     executable: /bin/bash
 
-# --------------------------------------------------
-# Pull ELK image
-# --------------------------------------------------
-
 - name: Pull ELK image
   shell: docker pull "{{ image_full }}"
   args:
     executable: /bin/bash
 
-# --------------------------------------------------
-# Remove old container safely
-# --------------------------------------------------
-
-- name: Remove old ELK container
+- name: Stop old ELK stack
   shell: |
-    docker rm -f {{ container_name }} 2>/dev/null || true
+    cd "{{ elk_base_dir }}"
+    docker compose down --remove-orphans || true
   args:
     executable: /bin/bash
 
-# --------------------------------------------------
-# Run ELK container
-# --------------------------------------------------
-
-- name: Run ELK container
+- name: Start ELK stack
   shell: |
-    docker run {{ run_args }} \
-      --name {{ container_name }} \
-      {{ image_full }}
+    cd "{{ elk_base_dir }}"
+    docker compose up -d
   args:
     executable: /bin/bash
 
-# --------------------------------------------------
-# Wait for container to start
-# --------------------------------------------------
-
-- name: Wait a few seconds for Logstash
+- name: Wait for Kibana
   pause:
-    seconds: 15
-
-# --------------------------------------------------
-# Debug running containers
-# --------------------------------------------------
+    seconds: 25
 
 - name: Show running containers
   shell: docker ps --format '{{ "{{.Names}}" }}|{{ "{{.Image}}" }}|{{ "{{.Status}}" }}'

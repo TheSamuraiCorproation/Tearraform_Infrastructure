@@ -183,11 +183,19 @@
     - name: Setup Docker if needed
       when: ecr_images | length > 0
       block:
-        - name: Install docker deps
-          ansible.builtin.apt:
-            name: "{{ docker_packages }}"
-            state: present
-            update_cache: yes
+        - name: Install Docker + Compose plugin
+  	  apt:
+	    name:
+	      - docker.io
+	      - docker-compose-plugin
+	      - jq
+	      - unzip
+	      - curl
+	      - ca-certificates
+	      - gnupg
+	      - lsb-release
+	    state: present
+	    update_cache: yes
 
         - name: Start docker
           ansible.builtin.service:

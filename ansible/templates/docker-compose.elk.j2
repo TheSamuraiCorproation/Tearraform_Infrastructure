@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
     container_name: elasticsearch
@@ -15,12 +14,12 @@ services:
       - esdata:/usr/share/elasticsearch/data
     restart: unless-stopped
 
-  {{- /* Logstash uses your ECR image provided in JSON (elk.ecr_repo_url) */ -}}
   logstash:
     image: "{{ logstash_image }}"
     container_name: logstash
     depends_on:
       - elasticsearch
+    command: ["logstash", "-f", "/usr/share/logstash/pipeline"]
     volumes:
       - /opt/elk/pipeline:/usr/share/logstash/pipeline:ro
       - /opt/elk/rules:/usr/share/logstash/rules:ro
