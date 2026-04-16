@@ -85,7 +85,7 @@
         state: present
 
     ########################################################################
-    # CLOUDWATCH AGENT (FIXED)
+    # CLOUDWATCH AGENT
     ########################################################################
     - name: Check if CloudWatch agent exists
       ansible.builtin.stat:
@@ -119,7 +119,6 @@
         dest: "{{ cloudwatch_agent_conf_dest }}"
         mode: "0644"
 
-    
     - name: Load config and start CloudWatch agent
       ansible.builtin.command: >
         /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
@@ -183,19 +182,21 @@
     - name: Setup Docker if needed
       when: ecr_images | length > 0
       block:
+
         - name: Install Docker + Compose plugin
-          apt:
+          ansible.builtin.apt:
             name:
-               - docker.io
-               - docker-compose-plugin
-               - jq
-               - unzip
-               - curl
-               - ca-certificates
-               - gnupg
-               - lsb-release
-             state: present
-             update_cache: yes
+              - docker.io
+              - docker-compose-plugin
+              - jq
+              - unzip
+              - curl
+              - ca-certificates
+              - gnupg
+              - lsb-release
+            state: present
+            update_cache: yes
+
         - name: Start docker
           ansible.builtin.service:
             name: docker
