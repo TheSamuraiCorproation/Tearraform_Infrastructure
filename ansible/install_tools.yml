@@ -119,7 +119,7 @@
         dest: "{{ cloudwatch_agent_conf_dest }}"
         mode: "0644"
 
-    # 🔥 CRITICAL FIX HERE
+    
     - name: Load config and start CloudWatch agent
       ansible.builtin.command: >
         /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
@@ -184,19 +184,18 @@
       when: ecr_images | length > 0
       block:
         - name: Install Docker + Compose plugin
-  	  apt:
-	    name:
-	      - docker.io
-	      - docker-compose-plugin
-	      - jq
-	      - unzip
-	      - curl
-	      - ca-certificates
-	      - gnupg
-	      - lsb-release
-	    state: present
-	    update_cache: yes
-
+          apt:
+            name:
+               - docker.io
+               - docker-compose-plugin
+               - jq
+               - unzip
+               - curl
+               - ca-certificates
+               - gnupg
+               - lsb-release
+             state: present
+             update_cache: yes
         - name: Start docker
           ansible.builtin.service:
             name: docker
