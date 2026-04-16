@@ -70,7 +70,7 @@
 
 - name: "Generic: Verify container is running (if no dedicated task)"
   ansible.builtin.shell: |
-    docker ps --filter "name={{ container_name }}" --format "{{.Names}} — {{.Status}}"
+    docker ps --filter "name={{ container_name }}" --format "{% raw %}{{.Names}} — {{.Status}}{% endraw %}"
   args:
     executable: /bin/bash
   register: container_status
