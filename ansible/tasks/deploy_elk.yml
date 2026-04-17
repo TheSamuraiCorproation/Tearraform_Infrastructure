@@ -79,6 +79,18 @@
   vars:
     logstash_image: "{{ image_full }}"
 
+- name: Ensure AWS CLI v2 is installed
+  shell: |
+    if ! command -v aws >/dev/null 2>&1; then
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+      curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+      unzip -q awscliv2.zip
+      sudo ./aws/install --update
+    fi
+  args:
+    executable: /bin/bash
+
 - name: Login to AWS ECR
   shell: |
     aws ecr get-login-password --region eu-central-1 \
