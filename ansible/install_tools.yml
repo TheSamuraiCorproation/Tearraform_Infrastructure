@@ -8,55 +8,49 @@
     tools_to_install: []
     aws_region: eu-central-1
 
+    # CloudWatch (FIXED VARIABLES)
     cloudwatch_agent_deb_url: "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_local: "/tmp/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_conf_dest: "/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json"
+
+    cloudwatch_log_group_prefix: "/terraform-infra/ec2-lab"
+    cloudwatch_namespace: "EC2/LabMonitoring"
 
     docker_keyring: /etc/apt/keyrings/docker.asc
     docker_list_file: /etc/apt/sources.list.d/docker.list
 
   tasks:
-    - name: Ensure python3 is installed (preflight)
+
+    ########################################################################
+    # PRE-FLIGHT
+    ########################################################################
+    - name: Ensure python3 is installed
       raw: |
-        if [ -x /usr/bin/python3 ]; then
-          exit 0
-        fi
-        DEBIAN_FRONTEND=noninteractive apt-get update -y
-        DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-apt
+        if [ -x /usr/bin/python3 ]; then exit 0; fi
+        apt-get update -y && apt-get install -y python3 python3-apt
       changed_when: false
 
     - name: Gather facts
       ansible.builtin.setup:
 
     - name: Show tools to install
-      ansible.builtin.debug:
-        msg: "Tools requested: {{ tools_to_install | default([]) }}"
+      debug:
+        msg: "Tools requested: {{ tools_to_install }}"
 
-    - name: Wait for apt/dpkg locks
-      ansible.builtin.shell: |
-        timeout=180
-        waited=0
-        while (fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
-               fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
-               fuser /var/lib/apt/lists/lock >/dev/null 2>&1); do
-          sleep 2
-          waited=$((waited+2))
-          if [ "$waited" -ge "$timeout" ]; then
-            echo "ERROR: apt lock timeout"
-            exit 2
-          fi
-        done
-      args:
-        executable: /bin/bash
+    ########################################################################
+    # APT
+    ########################################################################
+    - name: Wait for apt locks
+      shell: |
+        while fuser /var/lib/dpkg/lock >/dev/null 2>&1; do sleep 2; done
       changed_when: false
 
-    - name: Update apt cache
-      ansible.builtin.apt:
+    - name: Update apt
+      apt:
         update_cache: yes
-        cache_valid_time: 3600
 
-    - name: Install base utilities
-      ansible.builtin.apt:
+    - name: Install base packages
+      apt:
         name:
           - wget
           - curl
@@ -67,141 +61,110 @@
           - gnupg
         state: present
 
-    - name: Check if CloudWatch agent exists
-      ansible.builtin.stat:
-        path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
-      register: cw_agent_bin
-
+    ########################################################################
+    # CLOUDWATCH (NOW FIXED)
+    ########################################################################
     - name: Download CloudWatch agent
-      ansible.builtin.get_url:
+      get_url:
         url: "{{ cloudwatch_agent_deb_url }}"
         dest: "{{ cloudwatch_agent_local }}"
-        mode: "0644"
-      when: not cw_agent_bin.stat.exists
 
     - name: Install CloudWatch agent
-      ansible.builtin.command:
-        cmd: "dpkg -i {{ cloudwatch_agent_local }}"
-      ignore_errors: true
-      when: not cw_agent_bin.stat.exists
+      shell: |
+        dpkg -i {{ cloudwatch_agent_local }} || apt-get -f -y install
+      args:
+        executable: /bin/bash
 
-    - name: Fix dependencies
-      ansible.builtin.command: apt-get -f -y install
-
-    - name: Ensure CloudWatch directory exists
-      ansible.builtin.file:
+    - name: Create config dir
+      file:
         path: /opt/aws/amazon-cloudwatch-agent/etc
         state: directory
-        mode: "0755"
 
     - name: Deploy CloudWatch config
-      ansible.builtin.template:
-        src: "amazon-cloudwatch-agent.j2"
+      template:
+        src: amazon-cloudwatch-agent.j2
         dest: "{{ cloudwatch_agent_conf_dest }}"
-        mode: "0644"
 
-    - name: Load config and start CloudWatch agent
-      ansible.builtin.command: >
-        /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
-        -a fetch-config
-        -m ec2
-        -c file:{{ cloudwatch_agent_conf_dest }}
-        -s
-      register: cw_start
-      changed_when: true
+    - name: Start CloudWatch agent
+      shell: |
+        /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+        -a fetch-config -m ec2 -c file:{{ cloudwatch_agent_conf_dest }} -s
+      args:
+        executable: /bin/bash
 
-    - name: Verify CloudWatch agent running
-      ansible.builtin.command:
-        cmd: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a status
-      register: cw_status
-      retries: 6
-      delay: 5
-      until: "'running' in cw_status.stdout"
-
-    - name: Debug CloudWatch status
-      ansible.builtin.debug:
-        var: cw_status.stdout
-
-    - name: Initialize lists
-      ansible.builtin.set_fact:
+    ########################################################################
+    # CLASSIFY TOOLS
+    ########################################################################
+    - name: Init lists
+      set_fact:
         apt_packages: []
         ecr_images: []
 
-    - name: Classify APT tools
-      ansible.builtin.set_fact:
-        apt_packages: "{{ apt_packages + [item] }}"
-      when: item is string
-      loop: "{{ tools_to_install }}"
-
-    - name: Classify ECR tools
-      ansible.builtin.set_fact:
+    - name: Classify tools
+      set_fact:
         ecr_images: "{{ ecr_images + [item] }}"
-      when: item is mapping
       loop: "{{ tools_to_install }}"
 
-    - name: Debug classification
-      ansible.builtin.debug:
-        msg:
-          - "APT: {{ apt_packages }}"
-          - "ECR: {{ ecr_images }}"
-
-    - name: Install APT packages
-      ansible.builtin.apt:
-        name: "{{ apt_packages }}"
-        state: present
-      when: apt_packages | length > 0
-
-    - name: Add Docker apt keyring
-      ansible.builtin.shell: |
+    ########################################################################
+    # DOCKER (FIXED FOR UBUNTU)
+    ########################################################################
+    - name: Add Docker key
+      shell: |
         install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o {{ docker_keyring }}
         chmod a+r {{ docker_keyring }}
       args:
-        creates: "{{ docker_keyring }}"
         executable: /bin/bash
 
-    - name: Add Docker apt repository
-      ansible.builtin.shell: |
+    - name: Add Docker repo
+      shell: |
         . /etc/os-release
-        echo "deb [arch=$(dpkg --print-architecture) signed-by={{ docker_keyring }}] https://download.docker.com/linux/ubuntu ${UBUNTU_CODENAME:-$VERSION_CODENAME} stable" > {{ docker_list_file }}
+        echo "deb [arch=$(dpkg --print-architecture) signed-by={{ docker_keyring }}] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" > {{ docker_list_file }}
       args:
-        creates: "{{ docker_list_file }}"
         executable: /bin/bash
 
-    - name: Update apt cache after Docker repo
-      ansible.builtin.apt:
+    - name: Update apt again
+      apt:
         update_cache: yes
 
-    - name: Install Docker Engine and Compose plugin
-      ansible.builtin.apt:
+    - name: Install Docker
+      apt:
         name:
           - docker-ce
           - docker-ce-cli
           - containerd.io
-          - docker-buildx-plugin
           - docker-compose-plugin
         state: present
 
     - name: Start Docker
-      ansible.builtin.service:
+      service:
         name: docker
         state: started
         enabled: yes
 
-    - name: Deploy ELK stack (with Kibana)
-      ansible.builtin.include_tasks: "tasks/deploy_elk.yml"
+    ########################################################################
+    # DEPLOY ELK
+    ########################################################################
+    - name: Deploy ELK
+      include_tasks: tasks/deploy_elk.yml
       loop: "{{ ecr_images }}"
       loop_control:
         loop_var: ecr
-      when: ecr_images | length > 0 and (ecr.name | lower == 'elk')
+      when: ecr.name == "elk"
 
-    - name: Deploy ECR containers
-      ansible.builtin.include_tasks: "tasks/deploy_ecr_container.yml"
+    ########################################################################
+    # DEPLOY OTHER CONTAINERS
+    ########################################################################
+    - name: Deploy other containers
+      include_tasks: tasks/deploy_ecr_container.yml
       loop: "{{ ecr_images }}"
       loop_control:
         loop_var: ecr
-      when: ecr_images | length > 0 and (ecr.name | lower != 'elk')
+      when: ecr.name != "elk"
 
-    - name: Final message
-      ansible.builtin.debug:
-        msg: "EC2 fully configured with CloudWatch + tools 🚀"
+    ########################################################################
+    # FINAL
+    ########################################################################
+    - name: Done
+      debug:
+        msg: "EC2 READY 🚀"
