@@ -8,28 +8,14 @@
     tools_to_install: []
     aws_region: eu-central-1
 
-    # CloudWatch
     cloudwatch_agent_deb_url: "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_local: "/tmp/amazon-cloudwatch-agent.deb"
     cloudwatch_agent_conf_dest: "/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json"
-    cloudwatch_log_group_prefix: "/terraform-infra/ec2-lab"
-    cloudwatch_namespace: "EC2/LabMonitoring"
 
-    docker_packages:
-      - apt-transport-https
-      - ca-certificates
-      - curl
-      - gnupg
-      - lsb-release
-      - docker.io
-      - jq
-      - unzip
+    docker_keyring: /etc/apt/keyrings/docker.asc
+    docker_list_file: /etc/apt/sources.list.d/docker.list
 
   tasks:
-
-    ########################################################################
-    # PRE-FLIGHT
-    ########################################################################
     - name: Ensure python3 is installed (preflight)
       raw: |
         if [ -x /usr/bin/python3 ]; then
@@ -46,9 +32,6 @@
       ansible.builtin.debug:
         msg: "Tools requested: {{ tools_to_install | default([]) }}"
 
-    ########################################################################
-    # WAIT FOR APT LOCK
-    ########################################################################
     - name: Wait for apt/dpkg locks
       ansible.builtin.shell: |
         timeout=180
@@ -84,9 +67,6 @@
           - gnupg
         state: present
 
-    ########################################################################
-    # CLOUDWATCH AGENT
-    ########################################################################
     - name: Check if CloudWatch agent exists
       ansible.builtin.stat:
         path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
@@ -96,6 +76,7 @@
       ansible.builtin.get_url:
         url: "{{ cloudwatch_agent_deb_url }}"
         dest: "{{ cloudwatch_agent_local }}"
+        mode: "0644"
       when: not cw_agent_bin.stat.exists
 
     - name: Install CloudWatch agent
@@ -141,9 +122,6 @@
       ansible.builtin.debug:
         var: cw_status.stdout
 
-    ########################################################################
-    # CLASSIFY TOOLS
-    ########################################################################
     - name: Initialize lists
       ansible.builtin.set_fact:
         apt_packages: []
@@ -167,65 +145,63 @@
           - "APT: {{ apt_packages }}"
           - "ECR: {{ ecr_images }}"
 
-    ########################################################################
-    # INSTALL APT PACKAGES
-    ########################################################################
     - name: Install APT packages
       ansible.builtin.apt:
         name: "{{ apt_packages }}"
         state: present
       when: apt_packages | length > 0
 
-    ########################################################################
-    # DOCKER + AWS CLI
-    ########################################################################
-    - name: Setup Docker if needed
-      when: ecr_images | length > 0
-      block:
+    - name: Add Docker apt keyring
+      ansible.builtin.shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o {{ docker_keyring }}
+        chmod a+r {{ docker_keyring }}
+      args:
+        creates: "{{ docker_keyring }}"
+        executable: /bin/bash
 
-        - name: Install Docker + Compose plugin
-          ansible.builtin.apt:
-            name:
-              - docker.io
-              - docker-compose-plugin
-              - jq
-              - unzip
-              - curl
-              - ca-certificates
-              - gnupg
-              - lsb-release
-            state: present
-            update_cache: yes
+    - name: Add Docker apt repository
+      ansible.builtin.shell: |
+        . /etc/os-release
+        echo "deb [arch=$(dpkg --print-architecture) signed-by={{ docker_keyring }}] https://download.docker.com/linux/ubuntu ${UBUNTU_CODENAME:-$VERSION_CODENAME} stable" > {{ docker_list_file }}
+      args:
+        creates: "{{ docker_list_file }}"
+        executable: /bin/bash
 
-        - name: Start docker
-          ansible.builtin.service:
-            name: docker
-            state: started
-            enabled: yes
+    - name: Update apt cache after Docker repo
+      ansible.builtin.apt:
+        update_cache: yes
 
-        - name: Install AWS CLI v2
-          ansible.builtin.shell: |
-            tmpdir=$(mktemp -d)
-            cd "$tmpdir"
-            curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
-            unzip -q awscliv2.zip
-            sudo ./aws/install --update || true
-          args:
-            creates: /usr/local/bin/aws
+    - name: Install Docker Engine and Compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
 
-    ########################################################################
-    # DEPLOY CONTAINERS
-    ########################################################################
+    - name: Start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Deploy ELK stack (with Kibana)
+      ansible.builtin.include_tasks: "tasks/deploy_elk.yml"
+      loop: "{{ ecr_images }}"
+      loop_control:
+        loop_var: ecr
+      when: ecr_images | length > 0 and (ecr.name | lower == 'elk')
+
     - name: Deploy ECR containers
       ansible.builtin.include_tasks: "tasks/deploy_ecr_container.yml"
       loop: "{{ ecr_images }}"
       loop_control:
         loop_var: ecr
-      when: ecr_images | length > 0
+      when: ecr_images | length > 0 and (ecr.name | lower != 'elk')
 
-    ########################################################################
-    # FINAL
-    ########################################################################
     - name: Final message
       ansible.builtin.debug:
         msg: "EC2 fully configured with CloudWatch + tools 🚀"
