@@ -128,3 +128,21 @@
 
 - debug:
     var: docker_ps.stdout_lines
+    
+    
+- name: Auto create Kibana index pattern
+  shell: |
+    sleep 20
+
+    curl -X POST "http://localhost:5601/api/saved_objects/index-pattern/logs-*" \
+    -H "kbn-xsrf: true" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "attributes": {
+        "title": "logs-*",
+        "timeFieldName": "@timestamp"
+      }
+    }'
+  args:
+    executable: /bin/bash
+  ignore_errors: true

@@ -1,0 +1,183 @@
+---
+- name: Configure EC2 instance (Golden AMI)
+  hosts: all
+  become: yes
+  gather_facts: no
+
+  vars:
+    tools_to_install: []
+    aws_region: eu-central-1
+
+    cloudwatch_agent_deb_url: "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
+    cloudwatch_agent_local: "/tmp/amazon-cloudwatch-agent.deb"
+    cloudwatch_agent_conf_dest: "/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json"
+
+    docker_keyring: /etc/apt/keyrings/docker.asc
+    docker_list_file: /etc/apt/sources.list.d/docker.list
+
+  tasks:
+
+  ########################################################################
+  # BASE SYSTEM
+  ########################################################################
+
+  - name: Ensure python3 is installed
+    raw: |
+      if [ -x /usr/bin/python3 ]; then exit 0; fi
+      apt-get update -y && apt-get install -y python3 python3-apt
+    changed_when: false
+
+  - name: Gather facts
+    setup:
+
+  - name: Update apt
+    apt:
+      update_cache: yes
+
+  - name: Install base packages
+    apt:
+      name:
+        - curl
+        - wget
+        - jq
+        - ca-certificates
+        - apt-transport-https
+        - lsb-release
+        - gnupg
+        - netcat
+      state: present
+
+  ########################################################################
+  # CLOUDWATCH
+  ########################################################################
+
+  - name: Download CloudWatch agent
+    get_url:
+      url: "{{ cloudwatch_agent_deb_url }}"
+      dest: "{{ cloudwatch_agent_local }}"
+
+  - name: Install CloudWatch agent
+    shell: |
+      dpkg -i {{ cloudwatch_agent_local }} || apt-get -f -y install
+
+  ########################################################################
+  # FIREFOX (DCV FIX)
+  ########################################################################
+
+  - name: Install Firefox + utilities
+    apt:
+      name:
+        - firefox
+        - xdg-utils
+      state: present
+
+  - name: Set Firefox as default browser
+    shell: |
+      update-alternatives --set x-www-browser /usr/bin/firefox || true
+      update-alternatives --set gnome-www-browser /usr/bin/firefox || true
+      xdg-settings set default-web-browser firefox.desktop || true
+    ignore_errors: true
+
+  ########################################################################
+  # DOCKER INSTALL
+  ########################################################################
+
+  - name: Add Docker key
+    shell: |
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o {{ docker_keyring }}
+      chmod a+r {{ docker_keyring }}
+
+  - name: Add Docker repo
+    shell: |
+      . /etc/os-release
+      echo "deb [arch=$(dpkg --print-architecture) signed-by={{ docker_keyring }}] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+      > {{ docker_list_file }}
+
+  - name: Update apt again
+    apt:
+      update_cache: yes
+
+  - name: Install Docker
+    apt:
+      name:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-compose-plugin
+      state: present
+
+  - name: Start Docker
+    service:
+      name: docker
+      state: started
+      enabled: yes
+
+  ########################################################################
+  # ELK STACK
+  ########################################################################
+
+  - name: Deploy ELK (Logstash + Kibana + Elasticsearch)
+    include_tasks: tasks/deploy_elk.yml
+    loop: "{{ tools_to_install }}"
+    loop_control:
+      loop_var: ecr
+    when: ecr.name == "elk"
+
+  ########################################################################
+  # FILEBEAT (IMPORTANT FIX)
+  ########################################################################
+
+  - name: Install Filebeat
+    apt:
+      name: filebeat
+      state: present
+
+  - name: Configure Filebeat (system + suricata logs)
+    copy:
+      dest: /etc/filebeat/filebeat.yml
+      content: |
+        filebeat.inputs:
+
+          - type: log
+            enabled: true
+            paths:
+              - /var/log/syslog
+              - /var/log/auth.log
+
+          - type: log
+            enabled: true
+            paths:
+              - /var/log/suricata/eve.json
+            json.keys_under_root: true
+            json.add_error_key: true
+
+        processors:
+          - add_host_metadata: ~
+
+        output.logstash:
+          hosts: ["localhost:5044"]
+
+  - name: Enable Filebeat
+    systemd:
+      name: filebeat
+      enabled: yes
+      state: restarted
+
+  ########################################################################
+  # SURICATA LOG DIRECTORY SAFETY
+  ########################################################################
+
+  - name: Ensure Suricata log directory exists
+    file:
+      path: /var/log/suricata
+      state: directory
+      mode: "0755"
+
+  ########################################################################
+  # FINAL
+  ########################################################################
+
+  - name: Done
+    debug:
+      msg: "EC2 READY!!"
