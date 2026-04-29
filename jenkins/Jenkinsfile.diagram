@@ -74,7 +74,7 @@ pipeline {
           python3 diagrams/generate_mermaid.py \
             --payload  $DIAGRAM_DIR/payload.json \
             --out      $DIAGRAM_DIR/lab.mmd \
-            --html-out $DIAGRAM_DIR/lab.html
+            --html_out $DIAGRAM_DIR/lab.html
 
           echo "📐 Mermaid preview (first 120 lines):"
           sed -n '1,120p' $DIAGRAM_DIR/lab.mmd
