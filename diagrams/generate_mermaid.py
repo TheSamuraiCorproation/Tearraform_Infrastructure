@@ -558,7 +558,7 @@ def main():
     parser = argparse.ArgumentParser(description="Generate Mermaid diagram from lab payload")
     parser.add_argument("--payload",   required=True,  help="Path to the input payload JSON")
     parser.add_argument("--out",       required=True,  help="Path to write the .mmd diagram file")
-    parser.add_argument("--html-out",  default=None,   help="(Optional) Path to write standalone HTML viewer")
+    parser.add_argument("--html_out",  default=None,   help="(Optional) Path to write standalone HTML viewer")
     args = parser.parse_args()
 
     with open(args.payload, "r", encoding="utf-8") as f:
