@@ -1,9 +1,5 @@
-resource "aws_cloudwatch_dashboard" "ec2_dashboard" {
+/* resource "aws_cloudwatch_dashboard" "ec2_dashboard" {
   dashboard_name = "EC2-GoldenAMI-Dashboard"
-
-  lifecycle {
-    ignore_changes = all
-  }
 
   dashboard_body = jsonencode({
     widgets = [
@@ -51,5 +47,7 @@ resource "aws_cloudwatch_dashboard" "ec2_dashboard" {
       }
     ]
   })
+
+*/
 }
 
