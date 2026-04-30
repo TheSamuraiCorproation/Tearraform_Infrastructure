@@ -126,12 +126,15 @@ pipeline {
             set -e
 
             # Derive a safe folder name from the payload file_name field
-            LAB_ID=$(python3 -c "
-import json, sys
+LAB_ID=$(python3 -c "
+import json, re, os
 with open('$DIAGRAM_DIR/payload.json') as f:
     p = json.load(f)
-lab = p.get('file_name', 'unknown-lab').replace(' ', '-')
-print(lab)
+s3_key = os.environ.get('S3_KEY', '')
+timestamp = re.search(r'(\d{10,})', s3_key)
+ts = timestamp.group(1) if timestamp else 'unknown'
+user = p.get('user_name', 'unknown').replace(' ', '-').lower()
+print(f'{user}_{ts}')
 ")
 
             echo "📤 Uploading diagrams for lab: $LAB_ID"
