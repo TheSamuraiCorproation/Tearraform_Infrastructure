@@ -4,6 +4,7 @@ pipeline {
   parameters {
     string(name: 'S3_BUCKET', description: 'S3 bucket containing payload')
     string(name: 'S3_KEY',    description: 'S3 key of payload JSON')
+    string(name: 'LAB_ID',    description: 'Unique lab ID passed from main pipeline')
   }
 
   environment {
@@ -125,17 +126,9 @@ pipeline {
           sh '''
             set -e
 
-            # Derive a safe folder name from the payload file_name field
-LAB_ID=$(python3 -c "
-import json, re, os
-with open('$DIAGRAM_DIR/payload.json') as f:
-    p = json.load(f)
-s3_key = os.environ.get('S3_KEY', '')
-timestamp = re.search(r'(\d{10,})', s3_key)
-ts = timestamp.group(1) if timestamp else 'unknown'
-user = p.get('user_name', 'unknown').replace(' ', '-').lower()
-print(f'{user}_{ts}')
-")
+            # use what the main pipeline passed directly
+            LAB_ID="${params.LAB_ID}"
+
 
             echo "📤 Uploading diagrams for lab: $LAB_ID"
 
