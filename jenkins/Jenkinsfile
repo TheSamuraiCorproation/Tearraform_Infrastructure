@@ -66,6 +66,7 @@ pipeline {
                     if (!payload.service_type) error "Missing service_type in payload"
 
                     env.SERVICE_TYPE = payload.service_type
+                    env.USER_NAME = payload.user_name.replace(' ', '-').toLowerCase()
                     echo """
                     👤 User: ${payload.user_name}
                     🧩 Service Type: ${env.SERVICE_TYPE}
@@ -146,7 +147,8 @@ pipeline {
           string(
             name: 'S3_KEY',
             value: env.S3_PAYLOAD_KEY
-          )
+          ),
+          string(name: 'LAB_ID', value: "${env.USER_NAME}-lab-${env.BUILD_ID}-${env.INSTANCE_ID}")
         ]
     }
   }
@@ -163,6 +165,7 @@ stage('Install Tools on EC2 (Ansible)') {
         def instance_name = payload.instances.keySet()[0]
         def ip = sh(script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
         def instance_id = sh(script: "terraform output -json ec2_instance_ids | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
+        env.INSTANCE_ID = instance_id
 
         echo "🖥 EC2 instance IP: ${ip}"
 
@@ -232,7 +235,7 @@ stage('Install Tools on EC2 (Ansible)') {
         // Build the 2nd JSON consumed by the Kali attacking VM
         def attackJson = [
             // Unique identifier for this lab instance
-            lab_id: "lab-${instance_id}-${env.BUILD_ID}",
+            lab_id: "lab-${env.BUILD_ID}-${instance_id}",
             
             // User info passed from the 1st JSON
             user_name: payload.user_name,
@@ -262,7 +265,7 @@ stage('Install Tools on EC2 (Ansible)') {
         writeJSON file: 'attack_config.json', json: attackJson, pretty: 4
 
         sh """
-        aws s3 cp attack_config.json s3://${OUTPUT_BUCKET}/attack-configs/attack_config_${env.BUILD_ID}.json
+        aws s3 cp attack_config.json s3://${OUTPUT_BUCKET}/attack-configs/${env.USER_NAME}_attack_config_lab-${env.BUILD_ID}-${env.INSTANCE_ID}.json
         """
         echo "Attack JSON uploaded to S3: ${OUTPUT_BUCKET}"
 
