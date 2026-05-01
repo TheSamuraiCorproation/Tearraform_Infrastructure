@@ -127,6 +127,13 @@ pipeline {
                         chmod 400 client-access-key.pem
                     """
                     archiveArtifacts artifacts: 'client-access-key.pem'
+                  // ── Fetch instance_id here so it's available in post block ──
+                  def instance_name = payload.instances.keySet()[0]
+                  def instance_id = sh(
+                    script: "terraform output -json ec2_instance_ids | jq -r '.\"${instance_name}\"'",
+                    returnStdout: true
+                  ).trim()
+                  env.INSTANCE_ID = instance_id
                 }
             }
         }
@@ -165,7 +172,6 @@ stage('Install Tools on EC2 (Ansible)') {
         def instance_name = payload.instances.keySet()[0]
         def ip = sh(script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
         def instance_id = sh(script: "terraform output -json ec2_instance_ids | jq -r '.\"${instance_name}\"'", returnStdout: true).trim()
-        env.INSTANCE_ID = instance_id
 
         echo "🖥 EC2 instance IP: ${ip}"
 
