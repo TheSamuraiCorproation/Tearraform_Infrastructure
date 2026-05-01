@@ -93,7 +93,20 @@
         -a fetch-config -m ec2 -c file:{{ cloudwatch_agent_conf_dest }} -s
       args:
         executable: /bin/bash
-
+        
+    - name: Stop unattended-upgrades before Firefox install
+      shell: |
+        systemctl stop unattended-upgrades || true
+        killall unattended-upgr || true
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+           || fuser /var/lib/dpkg/lock          >/dev/null 2>&1; do
+          echo "Waiting for lock..."
+          sleep 3
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      
     - name: Install Firefox browser for DCV
       apt:
         name:
