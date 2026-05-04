@@ -8,7 +8,7 @@
   
   vars:
     cloudwatch_namespace: "GoldenAMI/EC2"
-    
+    cloudwatch_log_group_prefix: "/ec2/golden-ami"
   tasks:
     - name: Ensure python3 is installed
       raw: test -e /usr/bin/python3 || (apt -y update && apt install -y python3-minimal)
