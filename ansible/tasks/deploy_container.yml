@@ -1,0 +1,25 @@
+# ansible/tasks/deploy_container.yml
+---
+- name: "Pull Docker image for {{ tool.name }}"
+  docker_image:
+    name: "{{ tool.ecr_repo_url }}:{{ tool.image_tag }}"
+    source: pull
+  retries: 3
+  delay: 5
+
+- name: "Stop existing container {{ tool.name }} if running"
+  docker_container:
+    name: "{{ tool.name }}"
+    state: absent
+  ignore_errors: yes
+
+- name: "Run container {{ tool.name }}"
+  shell: |
+    {% if tool.env is defined %}
+    {% for key, value in tool.env.items() %}
+    export {{ key }}="{{ value }}"
+    {% endfor %}
+    {% endif %}
+    docker run --name {{ tool.name }} {{ tool.run_args }} {{ tool.ecr_repo_url }}:{{ tool.image_tag }}
+  args:
+    executable: /bin/bash
