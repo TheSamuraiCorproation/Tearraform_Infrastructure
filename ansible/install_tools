@@ -1,183 +1,210 @@
+# ansible/install_tools.yml
+
 ---
 - name: Configure EC2 instance (Golden AMI)
   hosts: all
   become: yes
-  gather_facts: no
-
-  vars:
-    tools_to_install: []
-    aws_region: eu-central-1
-
-    cloudwatch_agent_deb_url: "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
-    cloudwatch_agent_local: "/tmp/amazon-cloudwatch-agent.deb"
-    cloudwatch_agent_conf_dest: "/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-agent.json"
-
-    docker_keyring: /etc/apt/keyrings/docker.asc
-    docker_list_file: /etc/apt/sources.list.d/docker.list
-
+  gather_facts: yes
+  
   tasks:
-
-  ########################################################################
-  # BASE SYSTEM
-  ########################################################################
-
-  - name: Ensure python3 is installed
-    raw: |
-      if [ -x /usr/bin/python3 ]; then exit 0; fi
-      apt-get update -y && apt-get install -y python3 python3-apt
-    changed_when: false
-
-  - name: Gather facts
-    setup:
-
-  - name: Update apt
-    apt:
-      update_cache: yes
-
-  - name: Install base packages
-    apt:
-      name:
-        - curl
-        - wget
-        - jq
-        - ca-certificates
-        - apt-transport-https
-        - lsb-release
-        - gnupg
-        - netcat
-      state: present
-
-  ########################################################################
-  # CLOUDWATCH
-  ########################################################################
-
-  - name: Download CloudWatch agent
-    get_url:
-      url: "{{ cloudwatch_agent_deb_url }}"
-      dest: "{{ cloudwatch_agent_local }}"
-
-  - name: Install CloudWatch agent
-    shell: |
-      dpkg -i {{ cloudwatch_agent_local }} || apt-get -f -y install
-
-  ########################################################################
-  # FIREFOX (DCV FIX)
-  ########################################################################
-
-  - name: Install Firefox + utilities
-    apt:
-      name:
-        - firefox
-        - xdg-utils
-      state: present
-
-  - name: Set Firefox as default browser
-    shell: |
-      update-alternatives --set x-www-browser /usr/bin/firefox || true
-      update-alternatives --set gnome-www-browser /usr/bin/firefox || true
-      xdg-settings set default-web-browser firefox.desktop || true
-    ignore_errors: true
-
-  ########################################################################
-  # DOCKER INSTALL
-  ########################################################################
-
-  - name: Add Docker key
-    shell: |
-      install -m 0755 -d /etc/apt/keyrings
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o {{ docker_keyring }}
-      chmod a+r {{ docker_keyring }}
-
-  - name: Add Docker repo
-    shell: |
-      . /etc/os-release
-      echo "deb [arch=$(dpkg --print-architecture) signed-by={{ docker_keyring }}] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
-      > {{ docker_list_file }}
-
-  - name: Update apt again
-    apt:
-      update_cache: yes
-
-  - name: Install Docker
-    apt:
-      name:
-        - docker-ce
-        - docker-ce-cli
-        - containerd.io
-        - docker-compose-plugin
-      state: present
-
-  - name: Start Docker
-    service:
-      name: docker
-      state: started
-      enabled: yes
-
-  ########################################################################
-  # ELK STACK
-  ########################################################################
-
-  - name: Deploy ELK (Logstash + Kibana + Elasticsearch)
-    include_tasks: tasks/deploy_elk.yml
-    loop: "{{ tools_to_install }}"
-    loop_control:
-      loop_var: ecr
-    when: ecr.name == "elk"
-
-  ########################################################################
-  # FILEBEAT (IMPORTANT FIX)
-  ########################################################################
-
-  - name: Install Filebeat
-    apt:
-      name: filebeat
-      state: present
-
-  - name: Configure Filebeat (system + suricata logs)
-    copy:
-      dest: /etc/filebeat/filebeat.yml
-      content: |
-        filebeat.inputs:
-
-          - type: log
-            enabled: true
-            paths:
-              - /var/log/syslog
-              - /var/log/auth.log
-
-          - type: log
-            enabled: true
-            paths:
-              - /var/log/suricata/eve.json
-            json.keys_under_root: true
-            json.add_error_key: true
-
-        processors:
-          - add_host_metadata: ~
-
-        output.logstash:
-          hosts: ["localhost:5044"]
-
-  - name: Enable Filebeat
-    systemd:
-      name: filebeat
-      enabled: yes
-      state: restarted
-
-  ########################################################################
-  # SURICATA LOG DIRECTORY SAFETY
-  ########################################################################
-
-  - name: Ensure Suricata log directory exists
-    file:
-      path: /var/log/suricata
-      state: directory
-      mode: "0755"
-
-  ########################################################################
-  # FINAL
-  ########################################################################
-
-  - name: Done
-    debug:
-      msg: "EC2 READY!!"
+    - name: Ensure python3 is installed
+      raw: test -e /usr/bin/python3 || (apt -y update && apt install -y python3-minimal)
+      changed_when: false
+    
+    - name: Gather facts
+      setup:
+    
+    - name: Show tools to install
+      debug:
+        msg: "Tools requested: {{ tools_to_install }}"
+    
+    # CRITICAL: Kill all apt/dpkg processes before ANY package installation
+    - name: Kill all running apt/dpkg processes
+      shell: |
+        killall apt apt-get dpkg 2>/dev/null || true
+        rm -f /var/lib/apt/lists/lock
+        rm -f /var/cache/apt/archives/lock
+        rm -f /var/lib/dpkg/lock*
+      changed_when: false
+      ignore_errors: yes
+    
+    # Wait for any apt locks to clear
+    - name: Wait for apt locks to clear
+      shell: |
+        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+              fuser /var/lib/dpkg/lock >/dev/null 2>&1 || \
+              fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+              fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          echo "Waiting for apt lock..."
+          sleep 2
+        done
+      changed_when: false
+      retries: 30
+      delay: 2
+    
+    # Disable and stop unattended-upgrades PERMANENTLY
+    - name: Disable unattended-upgrades service
+      systemd:
+        name: unattended-upgrades
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+    
+    - name: Stop apt-daily services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - apt-daily.timer
+        - apt-daily-upgrade.timer
+        - apt-daily.service
+        - apt-daily-upgrade.service
+      ignore_errors: yes
+    
+    # Kill the processes again to be sure
+    - name: Kill unattended-upgrade processes
+      shell: |
+        pkill -9 -f unattended-upgrade || true
+        pkill -9 -f apt-get || true
+        pkill -9 -f dpkg || true
+      changed_when: false
+      ignore_errors: yes
+    
+    # Final wait to ensure locks are released
+    - name: Final wait for locks
+      pause:
+        seconds: 5
+    
+    # Now safe to update apt
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 0
+      retries: 3
+      delay: 10
+    
+    # Install base packages
+    - name: Install base packages
+      apt:
+        name:
+          - curl
+          - wget
+          - unzip
+          - jq
+          - docker.io
+          - awscli
+        state: present
+        update_cache: no
+      retries: 3
+      delay: 10
+    
+    # CloudWatch Agent Installation
+    - name: Download CloudWatch agent
+      get_url:
+        url: https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+        dest: /tmp/amazon-cloudwatch-agent.deb
+        mode: '0644'
+    
+    - name: Install CloudWatch agent
+      apt:
+        deb: /tmp/amazon-cloudwatch-agent.deb
+        state: present
+    
+    - name: Create CloudWatch config directory
+      file:
+        path: /opt/aws/amazon-cloudwatch-agent/etc
+        state: directory
+        mode: '0755'
+    
+    - name: Deploy CloudWatch agent configuration
+      template:
+        src: templates/amazon-cloudwatch-agent.j2
+        dest: /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+        mode: '0644'
+    
+    - name: Start CloudWatch agent
+      shell: |
+        /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+          -a fetch-config \
+          -m ec2 \
+          -s \
+          -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+      changed_when: true
+    
+    # Firefox installation with MAXIMUM protection against locks
+    - name: Pre-Firefox lock check
+      shell: |
+        # Kill everything one more time
+        pkill -9 -f unattended-upgrade || true
+        pkill -9 -f apt || true
+        
+        # Remove all locks
+        rm -f /var/lib/dpkg/lock* /var/lib/apt/lists/lock /var/cache/apt/archives/lock
+        
+        # Wait for locks
+        timeout=60
+        while [ $timeout -gt 0 ]; do
+          if ! fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+          timeout=$((timeout - 1))
+        done
+      changed_when: false
+    
+    - name: Install Firefox with timeout protection
+      apt:
+        name: firefox
+        state: present
+        update_cache: no
+      timeout: 300
+      retries: 2
+      delay: 10
+      register: firefox_install
+      ignore_errors: yes
+    
+    # Fallback: Install Firefox using dpkg if apt fails
+    - name: Fallback - Install Firefox via snap if apt fails
+      block:
+        - name: Check if Firefox installed via apt
+          shell: dpkg -l | grep firefox
+          register: firefox_check
+          ignore_errors: yes
+          changed_when: false
+        
+        - name: Install Firefox via snap as fallback
+          snap:
+            name: firefox
+            state: present
+          when: firefox_check.rc != 0
+          timeout: 180
+      when: firefox_install is failed
+    
+    # Docker setup for tools
+    - name: Start Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+    
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+    
+    # ECR Login
+    - name: Login to ECR
+      shell: |
+        aws ecr get-login-password --region eu-central-1 | \
+        docker login --username AWS --password-stdin 430118831270.dkr.ecr.eu-central-1.amazonaws.com
+      changed_when: false
+    
+    # Install Docker containers for each tool
+    - name: Pull and run Docker containers for tools
+      include_tasks: tasks/deploy_container.yml
+      loop: "{{ tools_to_install }}"
+      loop_control:
+        loop_var: tool
+      when: tools_to_install is defined and tools_to_install | length > 0
