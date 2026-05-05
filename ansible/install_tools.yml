@@ -137,7 +137,6 @@
       state: present
     when: firefox_install is failed
     ignore_errors: yes
-
   ########################################################################
   # DOCKER
   ########################################################################
@@ -148,6 +147,18 @@
       state: started
       enabled: yes
 
+  - name: Add ubuntu user to docker group
+    user:
+      name: ubuntu
+      groups: docker
+      append: yes
+
+  # 🔥 CRITICAL FIX
+  - name: Restart Docker to apply group changes
+    systemd:
+      name: docker
+      state: restarted
+
   - name: Wait for Docker to be ready
     shell: docker info
     register: docker_ready
@@ -155,13 +166,8 @@
     delay: 3
     until: docker_ready.rc == 0
     changed_when: false
-
-  - name: Add ubuntu user to docker group
-    user:
-      name: ubuntu
-      groups: docker
-      append: yes
-
+    
+    
   ########################################################################
   # ECR LOGIN
   ########################################################################
