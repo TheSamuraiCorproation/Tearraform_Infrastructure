@@ -1,25 +1,71 @@
-# ansible/tasks/deploy_container.yml
 ---
-- name: "Pull Docker image for {{ tool.name }}"
-  docker_image:
-    name: "{{ tool.ecr_repo_url }}:{{ tool.image_tag }}"
-    source: pull
-  retries: 3
-  delay: 5
+- name: Set container facts for {{ tool.name }}
+  set_fact:
+    container_name: "{{ tool.name }}"
+    image_ref: "{{ tool.ecr_repo_url }}:{{ tool.image_tag | default('latest') }}"
+    normalized_run_args: >-
+      {{
+        (tool.run_args | default(''))
+        | regex_replace('(^|\\s)-d(\\s|$)', ' ')
+        | regex_replace('(^|\\s)--restart\\s+unless-stopped(\\s|$)', ' ')
+        | trim
+      }}
+    effective_run_args: >-
+      -d --restart unless-stopped {{ normalized_run_args }}
 
-- name: "Stop existing container {{ tool.name }} if running"
-  docker_container:
-    name: "{{ tool.name }}"
-    state: absent
-  ignore_errors: yes
+- name: Create required directories for {{ tool.name }}
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "/var/log/{{ tool.name }}"
+    - "/opt/{{ tool.name }}"
+  when: tool.name in ['suricata', 'elk']
 
-- name: "Run container {{ tool.name }}"
+- name: Pull Docker image for {{ tool.name }}
   shell: |
-    {% if tool.env is defined %}
-    {% for key, value in tool.env.items() %}
-    export {{ key }}="{{ value }}"
-    {% endfor %}
-    {% endif %}
-    docker run --name {{ tool.name }} {{ tool.run_args }} {{ tool.ecr_repo_url }}:{{ tool.image_tag }}
+    set -euo pipefail
+    timeout 300s docker pull "{{ image_ref }}"
   args:
     executable: /bin/bash
+
+- name: Remove old container {{ tool.name }}
+  shell: |
+    docker rm -f "{{ container_name }}" >/dev/null 2>&1 || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Run container {{ tool.name }}
+  shell: |
+    set -euo pipefail
+
+    docker run {{ effective_run_args }} \
+      --name "{{ container_name }}" \
+      {% if tool.env is defined %}
+      {% for key, value in tool.env.items() %}
+      -e {{ key }}="{{ value }}" \
+      {% endfor %}
+      {% endif %}
+      "{{ image_ref }}"
+  args:
+    executable: /bin/bash
+  register: run_result
+  changed_when: true
+
+- name: Wait for container {{ tool.name }} to appear
+  shell: |
+    docker ps --filter "name=^/{{ container_name }}$" --format '{{ "{{.Status}}" }}'
+  register: container_status
+  retries: 10
+  delay: 3
+  until: container_status.stdout is search("Up")
+  changed_when: false
+  ignore_errors: yes
+
+- name: Show container {{ tool.name }} status
+  debug:
+    msg:
+      - "Image: {{ image_ref }}"
+      - "Status: {{ container_status.stdout | default('NOT RUNNING') }}"

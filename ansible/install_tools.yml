@@ -1,6 +1,6 @@
 # ansible/install_tools.yml
-
 ---
+
 - name: Configure EC2 instance (Golden AMI)
   hosts: all
   become: yes
@@ -147,6 +147,14 @@
       name: docker
       state: started
       enabled: yes
+
+  - name: Wait for Docker to be ready
+    shell: docker info
+    register: docker_ready
+    retries: 5
+    delay: 3
+    until: docker_ready.rc == 0
+    changed_when: false
 
   - name: Add ubuntu user to docker group
     user:
