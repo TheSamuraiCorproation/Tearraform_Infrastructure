@@ -123,7 +123,7 @@ pipeline {
           accessKeyVariable: 'AWS_ACCESS_KEY_ID',
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
-          sh '''
+          sh '''#!/bin/bash
             set -e
 
             # use what the main pipeline passed directly
