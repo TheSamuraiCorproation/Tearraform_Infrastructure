@@ -123,46 +123,44 @@ pipeline {
           accessKeyVariable: 'AWS_ACCESS_KEY_ID',
           secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
         ]]) {
+          script {
+            env.LAB_ID = params.LAB_ID
+          }
           sh '''#!/bin/bash
             set -e
-
-            # use what the main pipeline passed directly
-            LAB_ID="${params.LAB_ID}"
-
-
+    
+            LAB_ID="$LAB_ID"
+    
             echo "📤 Uploading diagrams for lab: $LAB_ID"
-
-            # Create the bucket if it does not already exist
+    
             aws s3api head-bucket --bucket $DIAGRAM_BUCKET 2>/dev/null || \
               aws s3api create-bucket \
                 --bucket $DIAGRAM_BUCKET \
                 --region $AWS_REGION \
                 --create-bucket-configuration LocationConstraint=$AWS_REGION
-
-            # Upload every artefact with the correct content-type
+    
             aws s3 cp $DIAGRAM_DIR/lab.svg \
               s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.svg \
               --region $AWS_REGION --content-type "image/svg+xml"
-
+    
             aws s3 cp $DIAGRAM_DIR/lab.png \
               s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.png \
               --region $AWS_REGION --content-type "image/png"
-
+    
             aws s3 cp $DIAGRAM_DIR/lab.html \
               s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.html \
               --region $AWS_REGION --content-type "text/html"
-
+    
             aws s3 cp $DIAGRAM_DIR/lab.mmd \
               s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.mmd \
               --region $AWS_REGION --content-type "text/plain"
-
+    
             echo "✅ Diagrams uploaded:"
             echo "   SVG  → s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.svg"
             echo "   PNG  → s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.png"
             echo "   HTML → s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.html"
             echo "   .mmd → s3://$DIAGRAM_BUCKET/diagrams/$LAB_ID/lab.mmd"
-
-            # Store the LAB_ID for the next stage
+    
             echo "$LAB_ID" > $DIAGRAM_DIR/.lab_id
           '''
         }
