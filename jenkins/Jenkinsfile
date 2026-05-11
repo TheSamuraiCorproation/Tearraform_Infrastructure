@@ -484,54 +484,36 @@ kubectl get ingress eks-dashboard-ingress \
 stage('Dispatch Validation to Kali') {
     steps {
         withCredentials([
+            string(credentialsId: 'kali-host', variable: 'KALI_HOST'),
+            string(credentialsId: 'kali-instance-id', variable: 'KALI_INSTANCE_ID'),
             sshUserPrivateKey(
                 credentialsId: 'kali-ssh-key',
                 keyFileVariable: 'KALI_KEY',
                 usernameVariable: 'KALI_USER'
             ),
-            string(credentialsId: 'kali-host', variable: 'KALI_HOST'),
             [$class: 'AmazonWebServicesCredentialsBinding',
-                credentialsId: 'aws-terraform-creds',
-                accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                credentialsId: 'aws-terraform-creds'
             ]
         ]) {
+
             script {
 
-                echo "🚀 Preparing Kali validation dispatch..."
+                echo "🚀 Dispatching to Kali..."
+                echo "🧠 Kali Instance ID: ${KALI_INSTANCE_ID}"
 
-                // 1. Fetch Kali instance ID from Terraform state
-                env.KALI_INSTANCE_ID = sh(
-                    script: "terraform output -raw kali_instance_id",
-                    returnStdout: true
-                ).trim()
+                def labId = "${params.LAB_ID}"
 
-                if (!env.KALI_INSTANCE_ID?.trim()) {
-                    error "❌ Kali instance ID not found in Terraform output"
-                }
-
-                // 2. Use generated S3 key (IMPORTANT: consistency with earlier stage)
-                def attackKey = env.S3_PAYLOAD_KEY
-
-                if (!attackKey?.trim()) {
-                    error "❌ Missing S3_PAYLOAD_KEY (attack config path)"
-                }
-
-                echo "🧠 Kali Instance ID: ${env.KALI_INSTANCE_ID}"
-                echo "📦 Attack Config: s3://${OUTPUT_BUCKET}/${attackKey}"
-
-                // 3. Trigger Kali execution via SSM
                 sh """
 aws ssm send-command \
   --region ${AWS_DEFAULT_REGION} \
-  --instance-ids ${env.KALI_INSTANCE_ID} \
+  --instance-ids ${KALI_INSTANCE_ID} \
   --document-name "AWS-RunShellScript" \
-  --comment "Kali Attack Validation Pipeline" \
+  --comment "Kali Validation Execution" \
   --parameters 'commands=[
-    "echo [+] Downloading attack config from S3...",
-    "aws s3 cp s3://${OUTPUT_BUCKET}/${attackKey} /home/kali/security-validation/incoming/test_all.json",
+    "echo [+] Downloading attack config...",
+    "aws s3 cp s3://ip-test-bucket-1774355639/attack-configs/${labId}.json /home/kali/security-validation/incoming/test_all.json",
 
-    "echo [+] Cleaning previous logs...",
+    "echo [+] Cleaning logs...",
     "rm -f /home/kali/security-validation/logs/execution.log || true",
 
     "echo [+] Running dispatcher...",
