@@ -500,37 +500,38 @@ stage('Dispatch Validation to Kali') {
 
                 echo "🚀 Preparing Kali validation dispatch..."
 
-                // -------------------------------------------------
-                // AUTO FETCH KALI INSTANCE ID FROM TERRAFORM
-                // -------------------------------------------------
+                // 1. Fetch Kali instance ID from Terraform state
                 env.KALI_INSTANCE_ID = sh(
                     script: "terraform output -raw kali_instance_id",
                     returnStdout: true
                 ).trim()
 
                 if (!env.KALI_INSTANCE_ID?.trim()) {
-                    error "❌ KALI_INSTANCE_ID not found from Terraform output"
+                    error "❌ Kali instance ID not found in Terraform output"
                 }
 
-                def labId = "${params.LAB_ID}"
+                // 2. Use generated S3 key (IMPORTANT: consistency with earlier stage)
+                def attackKey = env.S3_PAYLOAD_KEY
 
-                echo "🧠 Kali Instance: ${env.KALI_INSTANCE_ID}"
-                echo "📦 Kali Host: ${KALI_HOST}"
-                echo "📌 Lab ID: ${labId}"
+                if (!attackKey?.trim()) {
+                    error "❌ Missing S3_PAYLOAD_KEY (attack config path)"
+                }
 
-                
+                echo "🧠 Kali Instance ID: ${env.KALI_INSTANCE_ID}"
+                echo "📦 Attack Config: s3://${OUTPUT_BUCKET}/${attackKey}"
 
+                // 3. Trigger Kali execution via SSM
                 sh """
 aws ssm send-command \
   --region ${AWS_DEFAULT_REGION} \
   --instance-ids ${env.KALI_INSTANCE_ID} \
   --document-name "AWS-RunShellScript" \
-  --comment "Kali Validation Pipeline Execution" \
+  --comment "Kali Attack Validation Pipeline" \
   --parameters 'commands=[
     "echo [+] Downloading attack config from S3...",
-    "aws s3 cp s3://ip-test-bucket-1774355639/attack-configs/${params.LAB_ID}.json /home/kali/security-validation/incoming/test_all.json",
+    "aws s3 cp s3://${OUTPUT_BUCKET}/${attackKey} /home/kali/security-validation/incoming/test_all.json",
 
-    "echo [+] Cleaning logs...",
+    "echo [+] Cleaning previous logs...",
     "rm -f /home/kali/security-validation/logs/execution.log || true",
 
     "echo [+] Running dispatcher...",
