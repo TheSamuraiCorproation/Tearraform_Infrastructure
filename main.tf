@@ -184,3 +184,6 @@ output "eks_ecr_repo_urls" {
   value = try(module.eks["eks"].ecr_repo_urls, null)
 }
 
+output "kali_instance_id" {
+  value = aws_instance.kali.id
+}
