@@ -481,7 +481,38 @@ kubectl get ingress eks-dashboard-ingress \
   }
 }
 
+stage('Trigger Kali Validation Pipeline') {
+  steps {
+    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-terraform-creds']]) {
+      script {
 
+        def labId = "lab-${env.BUILD_ID}-${env.INSTANCE_ID}"
+        def s3Key = "attack-configs/${env.USER_NAME}_attack_config_${labId}.json"
+
+        echo "🚀 Triggering Kali validation for ${labId}"
+        echo "📦 S3 Key: ${s3Key}"
+
+        sh """
+aws ssm send-command \
+  --region ${AWS_DEFAULT_REGION} \
+  --instance-ids ${env.KALI_INSTANCE_ID} \
+  --document-name "AWS-RunShellScript" \
+  --comment "Kali Validation Pipeline Execution" \
+  --parameters 'commands=[
+    "echo '[+] Downloading attack config from S3...'",
+    "aws s3 cp s3://ip-test-bucket-1774355639/${s3Key} /home/kali/security-validation/incoming/test_all.json",
+
+    "echo '[+] Cleaning logs...'",
+    "rm -f /home/kali/security-validation/logs/execution.log || true",
+
+    "echo '[+] Running dispatcher...'",
+    "bash /home/kali/security-validation/dispatcher.sh"
+  ]'
+"""
+      }
+    }
+  }
+}
 
 stage('Send EKS Dashboard Access') {
   when { expression { env.SERVICE_TYPE == 'eks' } }
