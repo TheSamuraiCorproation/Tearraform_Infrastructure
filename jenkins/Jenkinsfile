@@ -484,41 +484,36 @@ kubectl get ingress eks-dashboard-ingress \
 stage('Dispatch Validation to Kali') {
     steps {
         withCredentials([
-            string(credentialsId: 'kali-host', variable: 'KALI_HOST'),
             string(credentialsId: 'kali-instance-id', variable: 'KALI_INSTANCE_ID'),
-            sshUserPrivateKey(
-                credentialsId: 'kali-ssh-key',
-                keyFileVariable: 'KALI_KEY',
-                usernameVariable: 'KALI_USER'
-            ),
             [$class: 'AmazonWebServicesCredentialsBinding',
-                credentialsId: 'aws-terraform-creds'
+                credentialsId: 'aws-terraform-creds',
+                accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
             ]
         ]) {
-
             script {
+                if (!env.ATTACK_CONFIG_KEY?.trim()) {
+                    error "ATTACK_CONFIG_KEY is missing"
+                }
 
                 echo "🚀 Dispatching to Kali..."
-                echo "🧠 Kali Instance ID: ${KALI_INSTANCE_ID}"
-
-                def labId = "${params.LAB_ID}"
+                echo "🧠 Kali Instance ID is set"
+                echo "📦 Attack config: s3://${OUTPUT_BUCKET}/${env.ATTACK_CONFIG_KEY}"
 
                 sh """
 aws ssm send-command \
   --region ${AWS_DEFAULT_REGION} \
-  --instance-ids ${KALI_INSTANCE_ID} \
+  --instance-ids "$KALI_INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
   --comment "Kali Validation Execution" \
-  --parameters 'commands=[
-    "echo [+] Downloading attack config...",
-    "aws s3 cp s3://ip-test-bucket-1774355639/attack-configs/${labId}.json /home/kali/security-validation/incoming/test_all.json",
-
-    "echo [+] Cleaning logs...",
-    "rm -f /home/kali/security-validation/logs/execution.log || true",
-
-    "echo [+] Running dispatcher...",
-    "bash /home/kali/security-validation/dispatcher.sh"
-  ]'
+  --parameters "commands=[
+    \\"echo [+] Downloading attack config from S3...\\",
+    \\"aws s3 cp s3://${OUTPUT_BUCKET}/${env.ATTACK_CONFIG_KEY} /home/kali/security-validation/incoming/test_all.json\\",
+    \\"echo [+] Cleaning logs...\\",
+    \\"rm -f /home/kali/security-validation/logs/execution.log || true\\",
+    \\"echo [+] Running dispatcher...\\",
+    \\"bash /home/kali/security-validation/dispatcher.sh\\"
+  ]"
 """
             }
         }
