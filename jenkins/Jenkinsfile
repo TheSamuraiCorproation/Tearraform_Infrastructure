@@ -493,8 +493,9 @@ stage('Dispatch Validation to Kali') {
         ]) {
             script {
                 if (!env.ATTACK_CONFIG_KEY?.trim()) {
-                    error "ATTACK_CONFIG_KEY is missing"
-                }
+    echo "⚠️ ATTACK_CONFIG_KEY not provided (Lambda trigger mode). Skipping Kali dispatch stage."
+    return
+}
 
                 echo "🚀 Dispatching to Kali..."
                 echo "🧠 Kali Instance ID is set"
