@@ -1,151 +1,41 @@
 pipeline {
     agent any
 
-    options {
-        timestamps()
-        disableConcurrentBuilds()
-    }
-
     parameters {
-        string(name: 'PAYLOAD_BUCKET', defaultValue: 'thesamuraibucket', description: 'S3 bucket containing the request JSON')
-        string(name: 'PAYLOAD_KEY', defaultValue: '', description: 'Exact S3 object key (leave blank to auto-pick latest)')
-        string(name: 'TARGET_IP', defaultValue: '', description: 'Target lab IP from Terraform output')
-        string(name: 'INSTANCE_ID', defaultValue: '', description: 'Terraform EC2 instance ID')
-        string(name: 'LAB_ID', defaultValue: '', description: 'Unique lab identifier')
-    }
-
-    environment {
-        AWS_DEFAULT_REGION = 'eu-central-1'
-        ARTIFACT_DIR = 'artifacts'
+        string(name: 'S3_BUCKET', defaultValue: '', description: 'Attack JSON bucket')
+        string(name: 'S3_KEY', defaultValue: '', description: 'Attack JSON key')
+        string(name: 'KALI_HOST', defaultValue: '', description: 'Kali IP')
+        string(name: 'KALI_USER', defaultValue: 'kali', description: 'SSH user on Kali')
+        string(name: 'KALI_WORKDIR', defaultValue: '~/security-validation/Kali_attacks', description: 'Attack directory on Kali')
+        string(name: 'SSH_CREDENTIALS_ID', defaultValue: 'kali-ssh-creds', description: 'Jenkins SSH credentials ID')
     }
 
     stages {
-        stage('Checkout Repository') {
-            steps {
-                checkout([$class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/TheSamuraiCorproation/Tearraform_Infrastructure.git',
-                        credentialsId: 'github-terraform-token'
-                    ]]
-                ])
-            }
-        }
-
-        stage('Download Payload') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-terraform-creds',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    script {
-                        env.S3_PAYLOAD_KEY = params.PAYLOAD_KEY ?: sh(
-                            script: "aws s3 ls s3://${params.PAYLOAD_BUCKET}/ | sort | tail -n 1 | awk '{print \\$4}' || echo ''",
-                            returnStdout: true
-                        ).trim()
-
-                        if (!env.S3_PAYLOAD_KEY) {
-                            error "No payload JSON found in bucket ${params.PAYLOAD_BUCKET}"
-                        }
-
-                        sh "aws s3 cp s3://${params.PAYLOAD_BUCKET}/${env.S3_PAYLOAD_KEY} payload.json"
-                    }
-                }
-            }
-        }
-
-        stage('Normalize Request') {
+        stage('Validate Inputs') {
             steps {
                 script {
-                    if (!params.TARGET_IP?.trim()) {
-                        error "TARGET_IP is required"
-                    }
-                    if (!params.INSTANCE_ID?.trim()) {
-                        error "INSTANCE_ID is required"
-                    }
-                    if (!params.LAB_ID?.trim()) {
-                        error "LAB_ID is required"
-                    }
-
-                    sh """
-                        python3 scripts/normalize_request.py payload.json \
-                          --target-ip '${params.TARGET_IP}' \
-                          --lab-id '${params.LAB_ID}' \
-                          --output normalized_request.json
-                    """
+                    if (!params.S3_BUCKET?.trim()) error("Missing S3_BUCKET")
+                    if (!params.S3_KEY?.trim()) error("Missing S3_KEY")
+                    if (!params.KALI_HOST?.trim()) error("Missing KALI_HOST")
                 }
             }
         }
 
-        stage('Wait For Lab Ready') {
+        stage('Run Dispatcher on Kali') {
             steps {
-                script {
+                sshagent([params.SSH_CREDENTIALS_ID]) {
                     sh """
-                        bash scripts/wait_for_lab.sh \
-                          '${params.INSTANCE_ID}' \
-                          '${AWS_DEFAULT_REGION}' \
-                          '${params.TARGET_IP}'
-                    """
+ssh -o StrictHostKeyChecking=no ${params.KALI_USER}@${params.KALI_HOST} '
+set -e
+mkdir -p ${params.KALI_WORKDIR}/incoming
+aws s3 cp s3://${params.S3_BUCKET}/${params.S3_KEY} ${params.KALI_WORKDIR}/incoming/attack.json
+cd ${params.KALI_WORKDIR}
+chmod +x dispatcher.sh
+./dispatcher.sh incoming/attack.json
+'
+"""
                 }
             }
-        }
-
-        stage('Dispatch Validation to Kali') {
-            steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'kali-ssh-key',
-                        keyFileVariable: 'KALI_KEY',
-                        usernameVariable: 'KALI_USER'
-                    ),
-                    string(credentialsId: 'kali-host', variable: 'KALI_HOST')
-                ]) {
-                    sh """
-                        bash scripts/dispatch_to_kali.sh \
-                          normalized_request.json \
-                          "${KALI_HOST}" \
-                          "${KALI_USER}" \
-                          "${KALI_KEY}"
-                    """
-                }
-            }
-        }
-
-        stage('Collect Results') {
-            steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'kali-ssh-key',
-                        keyFileVariable: 'KALI_KEY',
-                        usernameVariable: 'KALI_USER'
-                    ),
-                    string(credentialsId: 'kali-host', variable: 'KALI_HOST')
-                ]) {
-                    sh """
-                        bash scripts/collect_results.sh \
-                          '${params.LAB_ID}' \
-                          "${KALI_HOST}" \
-                          "${KALI_USER}" \
-                          "${KALI_KEY}" \
-                          "${ARTIFACT_DIR}"
-                    """
-                }
-                archiveArtifacts artifacts: 'artifacts/**', fingerprint: true
-            }
-        }
-    }
-
-    post {
-        always {
-            sh 'rm -f payload.json normalized_request.json || true'
-        }
-        success {
-            echo "Validation pipeline completed successfully"
-        }
-        failure {
-            echo "Validation pipeline failed"
         }
     }
 }
