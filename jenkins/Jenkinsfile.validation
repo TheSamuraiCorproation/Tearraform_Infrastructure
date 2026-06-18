@@ -22,17 +22,20 @@ pipeline {
         }
 
         stage('Run Dispatcher on Kali') {
-    steps {
-        sshagent(credentials: ['kali-ssh-creds']) {
-            sh """
+            steps {
+                sshagent(credentials: ['kali-ssh-creds']) {
+                    sh """
 ssh -o StrictHostKeyChecking=no ${params.KALI_USER}@${params.KALI_HOST} '
 set -e
-whoami
-hostname
+mkdir -p ${params.KALI_WORKDIR}/incoming
+aws s3 cp s3://${params.S3_BUCKET}/${params.S3_KEY} ${params.KALI_WORKDIR}/incoming/attack.json
+cd ${params.KALI_WORKDIR}
+chmod +x dispatcher.sh
+./dispatcher.sh incoming/attack.json
 '
 """
+                }
+            }
         }
-    }
-}
     }
 }
