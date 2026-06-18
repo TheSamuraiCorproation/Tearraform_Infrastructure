@@ -166,8 +166,10 @@ pipeline {
 stage('Install Tools on EC2 (Ansible)') {
   when { expression { env.SERVICE_TYPE == 'ec2' } }
   steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-terraform-creds'], string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY')]) 
-      {
+    withCredentials([
+      [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-terraform-creds'],
+      string(credentialsId: 'GEMINI_API_KEY', variable: 'GEMINI_API_KEY')
+    ]) {
       script {
         def payload = readJSON file: 'payload.json'
         def instance_name = payload.instances.keySet()[0]
@@ -176,14 +178,8 @@ stage('Install Tools on EC2 (Ansible)') {
 
         echo "🖥 EC2 instance IP: ${ip}"
 
-        // ---------------------------------------------------------------
-        // Determine which attack target services need to be installed
-        // based on the attack types the user selected.
-        // These are ECR containers that the attacks will target on the VM.
-        // ---------------------------------------------------------------
         def attackTypes = payload.attacks.collect { it.type }.unique()
 
-        // Map of attack type -> ECR containers needed on the vulnerable VM
         def attackServiceMap = [
           "ai": [
             [
@@ -204,7 +200,7 @@ stage('Install Tools on EC2 (Ansible)') {
               image_tag: "latest",
               run_args: "-d --restart unless-stopped -p 8080:8080 --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges",
               env: [
-                GEMINI_API_KEY: "${env.GEMINI_API_KEY}",  // pulled from Jenkins credentials
+                GEMINI_API_KEY: "${env.GEMINI_API_KEY}",
                 GEMINI_MODEL: "gemini-2.5-flash",
                 GEMINI_TIMEOUT_SECONDS: "600"
               ]
@@ -218,13 +214,9 @@ stage('Install Tools on EC2 (Ansible)') {
               run_args: "-d --restart unless-stopped -p 3000:3000"
             ]
           ]
-          // os and network don't need any extra containers
         ]
 
-        // Start with the tools the user explicitly chose in the payload
         def allTools = payload.instances[instance_name].tools_to_install ?: []
-
-        // Append attack target services based on selected attack types
         attackTypes.each { type ->
           if (attackServiceMap.containsKey(type)) {
             allTools = allTools + attackServiceMap[type]
@@ -233,67 +225,26 @@ stage('Install Tools on EC2 (Ansible)') {
 
         echo "🛠 Total tools to install: ${allTools.collect { it.name }}"
 
-        // Build logs object
-        def logs = [internal: true]
-        if (payload.log_output == "external") {
-            logs.external = payload.logs.external
-        }
-
-        // Build the 2nd JSON consumed by the Kali attacking VM
-        def attackJson = [
-            // Unique identifier for this lab instance
-            lab_id: "lab-${env.BUILD_ID}-${instance_id}",
-            
-            // User info passed from the 1st JSON
-            user_name: payload.user_name,
-            client_email: payload.client_email,
-        
-            // Instance info retrieved after Terraform provisioning
-            instance_name: instance_name,
-            instance_id: instance_id,
-            ip_address: ip,
-        
-            // Attacks the user selected on the platform
-            attacks: payload.attacks ?: [],
-        
-            // Security tools installed on the vulnerable VM
-            tools: payload.instances[instance_name].tools_to_install ?: [],
-        
-            // Log visualization mode chosen by the user (internal or external)
-            log_output: payload.log_output ?: "internal",
-        
-            // Logs object — always has internal, external only added if user chose it
-            logs: logs,
-            // VM credentials — set via Terraform user_data (cloud-init)
-            vm_username: "ubuntu",
-            vm_password: "ubuntu"
-        ]
-
-        writeJSON file: 'attack_config.json', json: attackJson, pretty: 4
-
-        sh """
-        aws s3 cp attack_config.json s3://${OUTPUT_BUCKET}/attack-configs/${env.USER_NAME}_attack_config_lab-${env.BUILD_ID}-${env.INSTANCE_ID}.json
-        """
-        echo "Attack JSON uploaded to S3: ${OUTPUT_BUCKET}"
-
         writeFile file: 'inventory.ini', text: """
 [ec2]
 ${ip} ansible_user=ubuntu ansible_ssh_private_key_file=client-access-key.pem
 """
 
-        // Pass the full merged tools list to Ansible
         def tools_json = writeJSON returnText: true, json: allTools
 
         sh "chmod 400 client-access-key.pem || true"
 
         sh """
           mkdir -p "${WORKSPACE}/.ssh"
-          echo " Scanning host key for ${ip}..."
+          echo "Scanning host key for ${ip}..."
           ssh-keyscan -H ${ip} > ${WORKSPACE}/known_hosts 2>/dev/null || true
           echo "Known hosts file created at: ${WORKSPACE}/known_hosts"
         """
 
-        def ok = sh(script: "ssh -o BatchMode=yes -o ConnectTimeout=8 -o UserKnownHostsFile=${WORKSPACE}/known_hosts -i client-access-key.pem ubuntu@${ip} 'echo SSH_OK' || echo SSH_FAIL", returnStdout: true).trim()
+        def ok = sh(
+          script: "ssh -o BatchMode=yes -o ConnectTimeout=8 -o UserKnownHostsFile=${WORKSPACE}/known_hosts -i client-access-key.pem ubuntu@${ip} 'echo SSH_OK' || echo SSH_FAIL",
+          returnStdout: true
+        ).trim()
         echo "SSH test result: ${ok}"
 
         if (ok != 'SSH_OK') {
@@ -310,6 +261,34 @@ ${ip} ansible_user=ubuntu ansible_ssh_private_key_file=client-access-key.pem
         ]) {
           sh "ansible-playbook -i inventory.ini --extra-vars 'tools_to_install=${tools_json}' ansible/install_tools.yml"
         }
+
+        def logs = [internal: true]
+        if (payload.log_output == "external") {
+          logs.external = payload.logs.external
+        }
+
+        def attackJson = [
+          lab_id: "lab-${env.BUILD_ID}-${instance_id}",
+          user_name: payload.user_name,
+          client_email: payload.client_email,
+          instance_name: instance_name,
+          instance_id: instance_id,
+          ip_address: ip,
+          attacks: payload.attacks ?: [],
+          tools: payload.instances[instance_name].tools_to_install ?: [],
+          log_output: payload.log_output ?: "internal",
+          logs: logs,
+          vm_username: "ubuntu",
+          vm_password: "ubuntu"
+        ]
+
+        writeJSON file: 'attack_config.json', json: attackJson, pretty: 4
+
+        sh """
+          aws s3 cp attack_config.json s3://${OUTPUT_BUCKET}/attack-configs/${env.USER_NAME}_attack_config_lab-${env.BUILD_ID}-${env.INSTANCE_ID}.json
+        """
+
+        echo "Attack JSON uploaded to S3: ${OUTPUT_BUCKET}"
       }
     }
   }
