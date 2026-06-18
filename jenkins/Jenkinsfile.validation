@@ -7,7 +7,6 @@ pipeline {
         string(name: 'KALI_HOST', defaultValue: '', description: 'Kali IP')
         string(name: 'KALI_USER', defaultValue: 'kali', description: 'SSH user on Kali')
         string(name: 'KALI_WORKDIR', defaultValue: '~/security-validation/Kali_attacks', description: 'Attack directory on Kali')
-        string(name: 'SSH_CREDENTIALS_ID', defaultValue: 'kali-ssh-creds', description: 'Jenkins SSH credentials ID')
     }
 
     stages {
@@ -23,8 +22,7 @@ pipeline {
 
         stage('Run Dispatcher on Kali') {
             steps {
-                sshagent(credentials: ['kali-ssh-creds']) {
-                    sh """
+                sh """
 ssh -o StrictHostKeyChecking=no ${params.KALI_USER}@${params.KALI_HOST} '
 set -e
 mkdir -p ${params.KALI_WORKDIR}/incoming
@@ -34,7 +32,6 @@ chmod +x dispatcher.sh
 ./dispatcher.sh incoming/attack.json
 '
 """
-                }
             }
         }
     }
