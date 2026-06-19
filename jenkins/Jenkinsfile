@@ -504,82 +504,46 @@ Samurai DevOps Team
 }
 
         stage('Send EC2 SSH Credentials') {
-    when { expression { env.SERVICE_TYPE == 'ec2' } }
-    steps {
-        withCredentials([[
-            $class: 'AmazonWebServicesCredentialsBinding',
-            credentialsId: 'aws-terraform-creds',
-            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        ]]) {
-            withEnv(["AWS_DEFAULT_REGION=eu-central-1"]) {
-                script {
-                    def payload = readJSON file: 'payload.json'
-                    def instance_name = payload.instances.keySet()[0]
-                    
-                    // Get EC2 IP
-                    def ip = sh(
-                        script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    // Get instance ID
-                    def instance_id = sh(
-                        script: "terraform output -json ec2_instance_ids | jq -r '.\"${instance_name}\"'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    // Get installed tools
-                    def tools = payload.instances[instance_name].tools_to_install ?: []
-                    def toolsList = tools.collect { tool ->
-                        "• <strong>${tool.name}</strong> - Running on port ${extractPort(tool.run_args)}"
-                    }.join("<br>")
-                    
-                    if (!toolsList) {
-                        toolsList = "<li><strong>CloudWatch Agent</strong> - System monitoring active</li>"
+            when { expression { env.SERVICE_TYPE == 'ec2' } }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-terraform-creds',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    withEnv(["AWS_DEFAULT_REGION=eu-central-1"]) {
+                        script {
+                            def payload = readJSON file: 'payload.json'
+                            def instance_name = payload.instances.keySet()[0]
+
+                            // Terraform output now works because credentials are present
+                            def ip = sh(
+                                script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'",
+                                returnStdout: true
+                            ).trim()
+
+                            emailext(
+                                to: payload.client_email,
+                                subject: "🔑 SSH Access for Your EC2 Instance",
+                                body: """
+Hello ${payload.user_name},
+
+Your EC2 instance is ready and reachable at:
+ssh -i client-access-key.pem ubuntu@${ip}
+
+Regards,  
+Samurai DevOps Team
+                                """,
+                                attachmentsPattern: 'client-access-key.pem'
+                            )
+                        }
                     }
-                    
-                    // Read HTML template
-                    def htmlTemplate = readFile 'jenkins/email-templates/ec2-credentials.html'
-                    
-                    // Replace placeholders
-                    def htmlBody = htmlTemplate
-                        .replace('{{USER_NAME}}', payload.user_name)
-                        .replace('{{LAB_ID}}', "lab-${env.BUILD_ID}-${instance_id}")
-                        .replace('{{INSTANCE_ID}}', instance_id)
-                        .replace('{{EC2_IP}}', ip)
-                        .replace('{{INSTALLED_TOOLS}}', toolsList)
-                    
-                    echo "✉️ Sending credentials email to: ${payload.client_email}"
-                    echo "📍 Instance IP: ${ip}"
-                    echo "🖥️ DCV URL: https://${ip}:8443"
-                    
-                    // Send email with professional settings
-                    emailext(
-                        to: payload.client_email,
-                        from: 'noreply@thesamurai.com',
-                        replyTo: 'support@thesamurai.com',
-                        subject: "🛡️ Your Security Lab is Ready - Lab ID: lab-${env.BUILD_ID}-${instance_id}",
-                        body: htmlBody,
-                        mimeType: 'text/html',
-                        attachmentsPattern: 'client-access-key.pem',
-                        attachLog: false
-                    )
-                    
-                    echo "✅ Credentials email sent successfully!"
                 }
             }
         }
-    }
-}
 
-// Helper function to extract port from run_args
-def extractPort(String runArgs) {
-    def matcher = runArgs =~ /-p\s+(\d+):/
-    return matcher ? matcher[0][1] : 'N/A'
-}
-
-     
+    } 
 
     post {
         always {
