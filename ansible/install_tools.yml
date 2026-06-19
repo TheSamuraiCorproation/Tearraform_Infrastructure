@@ -23,12 +23,17 @@
     raw: test -e /usr/bin/python3 || (apt-get update -y && apt-get install -y python3-minimal)
     changed_when: false
 
-  - name: Parse tools_to_install from JSON string if necessary
+  - name: Parse tools_to_install from JSON string (First pass)
     set_fact:
       tools_to_install: "{{ tools_to_install | from_json }}"
     when: tools_to_install is string and tools_to_install | trim | length > 0
 
-  - name: Default tools_to_install to empty list if undefined or empty
+  - name: Parse tools_to_install from JSON string (Second pass)
+    set_fact:
+      tools_to_install: "{{ tools_to_install | from_json }}"
+    when: tools_to_install is string and tools_to_install | trim | length > 0
+
+  - name: Default tools_to_install to empty list if undefined
     set_fact:
       tools_to_install: []
     when: (tools_to_install is not defined) or (tools_to_install is string and tools_to_install | trim | length == 0)
