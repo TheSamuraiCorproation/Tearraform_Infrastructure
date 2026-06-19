@@ -10,33 +10,17 @@
     cloudwatch_namespace: "GoldenAMI/EC2"
     cloudwatch_log_group_prefix: "/ec2/golden-ami"
     aws_region: "eu-central-1"
-    # This fixes the MODULE FAILURE on Gather Facts for modern Ubuntu AMIs
     ansible_python_interpreter: /usr/bin/python3
 
   tasks:
 
   ########################################################################
-  # BASE SYSTEM & PAYLOAD PARSING
+  # BASE SYSTEM
   ########################################################################
 
   - name: Ensure python3 is installed
     raw: test -e /usr/bin/python3 || (apt-get update -y && apt-get install -y python3-minimal)
     changed_when: false
-
-  - name: Parse tools_to_install from JSON string (First pass)
-    set_fact:
-      tools_to_install: "{{ tools_to_install | from_json }}"
-    when: tools_to_install is string and tools_to_install | trim | length > 0
-
-  - name: Parse tools_to_install from JSON string (Second pass)
-    set_fact:
-      tools_to_install: "{{ tools_to_install | from_json }}"
-    when: tools_to_install is string and tools_to_install | trim | length > 0
-
-  - name: Default tools_to_install to empty list if undefined
-    set_fact:
-      tools_to_install: []
-    when: (tools_to_install is not defined) or (tools_to_install is string and tools_to_install | trim | length == 0)
 
   - name: Gather facts
     setup:
@@ -198,14 +182,9 @@
   # PRE-DEPLOY: ELK NETWORK & LOGSTASH CONFIG
   ########################################################################
 
-  - name: Check if ELK stack is requested
-    set_fact:
-      elk_requested: "{{ tools_to_install | selectattr('name', 'in', ['elasticsearch', 'kibana', 'logstash']) | list | length > 0 }}"
-    when: tools_to_install is iterable and tools_to_install | length > 0
-
   - name: Create Docker network for ELK
     shell: docker network create elk-net || true
-    when: elk_requested is defined and elk_requested
+    when: "'elasticsearch' in tools_to_install or 'logstash' in tools_to_install or 'kibana' in tools_to_install"
     changed_when: false
 
   - name: Ensure /var/log/suricata directory exists
@@ -213,11 +192,11 @@
       path: /var/log/suricata
       state: directory
       mode: '0755'
-    when: tools_to_install | length > 0 and 'suricata' in (tools_to_install | map(attribute='name') | list)
+    when: "'suricata' in tools_to_install"
 
   - name: Fix permissions so Logstash can read Suricata logs
     shell: chmod -R 755 /var/log/suricata
-    when: tools_to_install | length > 0 and 'suricata' in (tools_to_install | map(attribute='name') | list) and elk_requested is defined and elk_requested
+    when: "'suricata' in tools_to_install and 'logstash' in tools_to_install"
     changed_when: false
 
   - name: Create Logstash pipeline directory
@@ -225,7 +204,7 @@
       path: /opt/logstash/pipeline
       state: directory
       mode: '0755'
-    when: tools_to_install | length > 0 and 'logstash' in (tools_to_install | map(attribute='name') | list)
+    when: "'logstash' in tools_to_install"
 
   - name: Configure Logstash to read Suricata logs and send to Elasticsearch
     copy:
@@ -246,7 +225,7 @@
             index => "suricata-logs"
           }
         }
-    when: tools_to_install | length > 0 and 'logstash' in (tools_to_install | map(attribute='name') | list)
+    when: "'logstash' in tools_to_install"
 
   ########################################################################
   # DEPLOY CONTAINERS
@@ -254,7 +233,9 @@
 
   - name: Pull and run Docker containers for tools
     include_tasks: tasks/deploy_container.yml
-    loop: "{{ tools_to_install }}"
+    # This forces Ansible to parse the JSON string into a list at runtime, 
+    # bypassing the Jenkins string interpolation issue entirely.
+    loop: "{{ tools_to_install | from_json if (tools_to_install | type_debug == 'str') else tools_to_install }}"
     loop_control:
       loop_var: tool
     when: tools_to_install is defined and tools_to_install | length > 0
