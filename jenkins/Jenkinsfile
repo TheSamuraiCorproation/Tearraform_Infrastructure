@@ -551,7 +551,7 @@ Samurai DevOps Team
                         to: payload.client_email,
                         subject: "🛡️ Your DOJO Cybersecurity Lab is Ready",
                         body: textBody,
-                        html: htmlBody,
+                        htmlBody: htmlBody, 
                         attachmentsPattern: 'client-access-key.pem'
                     )
                 }
