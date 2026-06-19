@@ -503,45 +503,62 @@ Samurai DevOps Team
   }
 }
 
-        stage('Send EC2 SSH Credentials') {
-            when { expression { env.SERVICE_TYPE == 'ec2' } }
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-terraform-creds',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    withEnv(["AWS_DEFAULT_REGION=eu-central-1"]) {
-                        script {
-                            def payload = readJSON file: 'payload.json'
-                            def instance_name = payload.instances.keySet()[0]
+stage('Send EC2 SSH Credentials') {
+    when { expression { env.SERVICE_TYPE == 'ec2' } }
+    steps {
+        withCredentials([[
+            $class: 'AmazonWebServicesCredentialsBinding',
+            credentialsId: 'aws-terraform-creds',
+            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+        ]]) {
+            withEnv(["AWS_DEFAULT_REGION=eu-central-1"]) {
+                script {
+                    def payload = readJSON file: 'payload.json'
+                    def instance_name = payload.instances.keySet()[0]
 
-                            // Terraform output now works because credentials are present
-                            def ip = sh(
-                                script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'",
-                                returnStdout: true
-                            ).trim()
+                    // Terraform output now works because credentials are present
+                    def ip = sh(
+                        script: "terraform output -json ec2_public_ips | jq -r '.\"${instance_name}\"'",
+                        returnStdout: true
+                    ).trim()
 
-                            emailext(
-                                to: payload.client_email,
-                                subject: "🔑 SSH Access for Your EC2 Instance",
-                                body: """
+                    // Construct the NICE DCV URL
+                    def dcvUrl = "https://${ip}:8443"
+
+                    // Read the HTML template and replace placeholders
+                    def htmlBody = readFile 'jenkins/email-templates/ec2-credentials.html'
+                    htmlBody = htmlBody.replace('{{USER_NAME}}', payload.user_name)
+                    htmlBody = htmlBody.replace('{{IP_ADDRESS}}', ip)
+                    htmlBody = htmlBody.replace('{{DCV_URL}}', dcvUrl)
+
+                    // Plain text fallback for email clients that don't support HTML
+                    def textBody = """
 Hello ${payload.user_name},
 
 Your EC2 instance is ready and reachable at:
 ssh -i client-access-key.pem ubuntu@${ip}
 
+Access your GUI here:
+ ${dcvUrl}
+(Credentials: ubuntu / ubuntu)
+
 Regards,  
 Samurai DevOps Team
-                                """,
-                                attachmentsPattern: 'client-access-key.pem'
-                            )
-                        }
-                    }
+                    """
+
+                    emailext(
+                        to: payload.client_email,
+                        subject: "🛡️ Your DOJO Cybersecurity Lab is Ready",
+                        body: textBody,
+                        html: htmlBody,
+                        attachmentsPattern: 'client-access-key.pem'
+                    )
                 }
             }
         }
+    }
+}
 
     } 
 
