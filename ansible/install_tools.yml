@@ -10,6 +10,8 @@
     cloudwatch_namespace: "GoldenAMI/EC2"
     cloudwatch_log_group_prefix: "/ec2/golden-ami"
     aws_region: "eu-central-1"
+    # This fixes the MODULE FAILURE on Gather Facts for modern Ubuntu AMIs
+    ansible_python_interpreter: /usr/bin/python3
 
   tasks:
 
@@ -21,9 +23,6 @@
     raw: test -e /usr/bin/python3 || (apt-get update -y && apt-get install -y python3-minimal)
     changed_when: false
 
-  - name: Gather facts
-    setup:
-
   - name: Parse tools_to_install from JSON string if necessary
     set_fact:
       tools_to_install: "{{ tools_to_install | from_json }}"
@@ -33,6 +32,9 @@
     set_fact:
       tools_to_install: []
     when: (tools_to_install is not defined) or (tools_to_install is string and tools_to_install | trim | length == 0)
+
+  - name: Gather facts
+    setup:
 
   - name: Show tools to install
     debug:
