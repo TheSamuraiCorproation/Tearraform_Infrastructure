@@ -137,6 +137,7 @@
       state: present
     when: firefox_install is failed
     ignore_errors: yes
+
   ########################################################################
   # DOCKER
   ########################################################################
@@ -153,7 +154,6 @@
       groups: docker
       append: yes
 
-  # 🔥 CRITICAL FIX
   - name: Restart Docker to apply group changes
     systemd:
       name: docker
@@ -167,7 +167,6 @@
     until: docker_ready.rc == 0
     changed_when: false
     
-    
   ########################################################################
   # ECR LOGIN
   ########################################################################
@@ -177,6 +176,59 @@
       aws ecr get-login-password --region {{ aws_region }} | \
       docker login --username AWS --password-stdin 430118831270.dkr.ecr.eu-central-1.amazonaws.com
     changed_when: false
+
+  ########################################################################
+  # PRE-DEPLOY: ELK NETWORK & LOGSTASH CONFIG
+  ########################################################################
+
+  - name: Check if ELK stack is requested
+    set_fact:
+      elk_requested: "{{ tools_to_install | selectattr('name', 'in', ['elasticsearch', 'kibana', 'logstash']) | list | length > 0 }}"
+
+  - name: Create Docker network for ELK
+    shell: docker network create elk-net || true
+    when: elk_requested
+    changed_when: false
+
+  - name: Ensure /var/log/suricata directory exists
+    file:
+      path: /var/log/suricata
+      state: directory
+      mode: '0755'
+    when: "'suricata' in (tools_to_install | map(attribute='name') | list)"
+
+  - name: Fix permissions so Logstash can read Suricata logs
+    shell: chmod -R 755 /var/log/suricata
+    when: "'suricata' in (tools_to_install | map(attribute='name') | list) and elk_requested"
+    changed_when: false
+
+  - name: Create Logstash pipeline directory
+    file:
+      path: /opt/logstash/pipeline
+      state: directory
+      mode: '0755'
+    when: "'logstash' in (tools_to_install | map(attribute='name') | list)"
+
+  - name: Configure Logstash to read Suricata logs and send to Elasticsearch
+    copy:
+      dest: /opt/logstash/pipeline/suricata.conf
+      content: |
+        input {
+          file {
+            path => "/var/log/suricata/eve.json"
+            start_position => "beginning"
+            sincedb_path => "/dev/null"
+            mode => "read"
+            codec => json
+          }
+        }
+        output {
+          elasticsearch {
+            hosts => ["http://elasticsearch:9200"]
+            index => "suricata-logs"
+          }
+        }
+    when: "'logstash' in (tools_to_install | map(attribute='name') | list)"
 
   ########################################################################
   # DEPLOY CONTAINERS
