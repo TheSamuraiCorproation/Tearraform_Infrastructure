@@ -503,6 +503,8 @@ Samurai DevOps Team
   }
 }
 
+
+
 stage('Send EC2 SSH Credentials') {
     when { expression { env.SERVICE_TYPE == 'ec2' } }
     steps {
@@ -532,26 +534,12 @@ stage('Send EC2 SSH Credentials') {
                     htmlBody = htmlBody.replace('{{IP_ADDRESS}}', ip)
                     htmlBody = htmlBody.replace('{{DCV_URL}}', dcvUrl)
 
-                    // Plain text fallback for email clients that don't support HTML
-                    def textBody = """
-Hello ${payload.user_name},
-
-Your EC2 instance is ready and reachable at:
-ssh -i client-access-key.pem ubuntu@${ip}
-
-Access your GUI here:
- ${dcvUrl}
-(Credentials: ubuntu / ubuntu)
-
-Regards,  
-Samurai DevOps Team
-                    """
-
+                    // Send the email forcing HTML format
                     emailext(
+                        mimeType: 'text/html', // <--- THIS FORCES THE HTML DESIGN
                         to: payload.client_email,
                         subject: "🛡️ Your DOJO Cybersecurity Lab is Ready",
-                        body: textBody,
-                        htmlBody: htmlBody, 
+                        body: htmlBody,         // <--- PASS HTML DIRECTLY TO BODY
                         attachmentsPattern: 'client-access-key.pem'
                     )
                 }
