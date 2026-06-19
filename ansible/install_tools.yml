@@ -14,7 +14,7 @@
   tasks:
 
   ########################################################################
-  # BASE SYSTEM
+  # BASE SYSTEM & PAYLOAD PARSING
   ########################################################################
 
   - name: Ensure python3 is installed
@@ -23,6 +23,16 @@
 
   - name: Gather facts
     setup:
+
+  - name: Parse tools_to_install from JSON string if necessary
+    set_fact:
+      tools_to_install: "{{ tools_to_install | from_json }}"
+    when: tools_to_install is string and tools_to_install | trim | length > 0
+
+  - name: Default tools_to_install to empty list if undefined or empty
+    set_fact:
+      tools_to_install: []
+    when: (tools_to_install is not defined) or (tools_to_install is string and tools_to_install | trim | length == 0)
 
   - name: Show tools to install
     debug:
@@ -184,10 +194,11 @@
   - name: Check if ELK stack is requested
     set_fact:
       elk_requested: "{{ tools_to_install | selectattr('name', 'in', ['elasticsearch', 'kibana', 'logstash']) | list | length > 0 }}"
+    when: tools_to_install is iterable and tools_to_install | length > 0
 
   - name: Create Docker network for ELK
     shell: docker network create elk-net || true
-    when: elk_requested
+    when: elk_requested is defined and elk_requested
     changed_when: false
 
   - name: Ensure /var/log/suricata directory exists
@@ -195,11 +206,11 @@
       path: /var/log/suricata
       state: directory
       mode: '0755'
-    when: "'suricata' in (tools_to_install | map(attribute='name') | list)"
+    when: tools_to_install | length > 0 and 'suricata' in (tools_to_install | map(attribute='name') | list)
 
   - name: Fix permissions so Logstash can read Suricata logs
     shell: chmod -R 755 /var/log/suricata
-    when: "'suricata' in (tools_to_install | map(attribute='name') | list) and elk_requested"
+    when: tools_to_install | length > 0 and 'suricata' in (tools_to_install | map(attribute='name') | list) and elk_requested is defined and elk_requested
     changed_when: false
 
   - name: Create Logstash pipeline directory
@@ -207,7 +218,7 @@
       path: /opt/logstash/pipeline
       state: directory
       mode: '0755'
-    when: "'logstash' in (tools_to_install | map(attribute='name') | list)"
+    when: tools_to_install | length > 0 and 'logstash' in (tools_to_install | map(attribute='name') | list)
 
   - name: Configure Logstash to read Suricata logs and send to Elasticsearch
     copy:
@@ -228,7 +239,7 @@
             index => "suricata-logs"
           }
         }
-    when: "'logstash' in (tools_to_install | map(attribute='name') | list)"
+    when: tools_to_install | length > 0 and 'logstash' in (tools_to_install | map(attribute='name') | list)
 
   ########################################################################
   # DEPLOY CONTAINERS
