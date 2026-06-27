@@ -61,31 +61,27 @@ data "aws_s3_object" "payload" {
 locals {
   payload = jsondecode(data.aws_s3_object.payload.body)
 
-  # defensive default: ensure payload.eks exists and is an object/map
   payload_eks = try(local.payload.eks, {})
+  is_ec2      = lower(tostring(local.payload.service_type)) == "ec2"
+  is_eks      = lower(tostring(local.payload.service_type)) == "eks"
 
-  # EC2 (unchanged behavior)
-  is_ec2           = local.payload.service_type == "ec2"
-  instance_keys    = local.is_ec2 ? keys(local.payload.instances) : []
-  first_instance   = local.is_ec2 && length(local.instance_keys) > 0 ? local.payload.instances[local.instance_keys[0]] : null
-  subnet_id        = local.first_instance != null ? lookup(local.first_instance, "subnet_id", null) : null
-  security_groups  = local.first_instance != null ? lookup(local.first_instance, "security_groups", []) : []
+  instance_keys   = local.is_ec2 ? keys(try(local.payload.instances, {})) : []
+  first_instance  = local.is_ec2 && length(local.instance_keys) > 0 ? local.payload.instances[local.instance_keys[0]] : null
+  subnet_id       = local.first_instance != null ? lookup(local.first_instance, "subnet_id", null) : null
+  security_groups = local.first_instance != null ? lookup(local.first_instance, "security_groups", []) : []
 
-  # EKS flags & defensive parsing
-  is_eks = local.payload.service_type == "eks"
+  eks_subnet_ids_raw = try(local.payload_eks.subnet_ids, [])
+  eks_subnet_ids     = [for id in local.eks_subnet_ids_raw : tostring(id)]
 
-  # normalize subnet_ids -> list(string)
-  eks_subnet_ids_raw = lookup(local.payload_eks, "subnet_ids", [])
-  eks_subnet_ids = [for id in local.eks_subnet_ids_raw : tostring(id)]
-
-  # normalize tools_to_install -> list(string) (module expects list of names)
-  eks_tools_raw = lookup(local.payload_eks, "tools_to_install", [])
+  eks_tools_raw = try(local.payload_eks.tools_to_install, [])
   eks_tools = [
     for t in local.eks_tools_raw :
     can(tostring(t)) ? tostring(t) :
-    (can(t["name"]) ? tostring(t["name"]) :
-    (can(t["tool"]) ? tostring(t["tool"]) : jsonencode(t)))
+    (can(t.name) ? tostring(t.name) :
+    (can(t.tool) ? tostring(t.tool) : jsonencode(t)))
   ]
+
+  supported_eks_versions = ["1.35"]
 
   eks_config = {
     cluster_name       = tostring(lookup(local.payload_eks, "cluster_name", ""))
@@ -93,20 +89,29 @@ locals {
     subnet_ids         = local.eks_subnet_ids
     Owner              = tostring(lookup(local.payload_eks, "Owner", ""))
     tools_to_install   = local.eks_tools
-    kubernetes_version = tostring(lookup(local.payload_eks, "kubernetes_version", "1.29"))
+    kubernetes_version = tostring(lookup(local.payload_eks, "kubernetes_version", "1.35"))
   }
 
   validate_eks = local.is_eks ? (
     local.eks_config.cluster_name != "" &&
     local.eks_config.vpc_id != "" &&
     length(local.eks_config.subnet_ids) > 0 &&
-    local.eks_config.Owner != ""
+    local.eks_config.Owner != "" &&
+    contains(local.supported_eks_versions, local.eks_config.kubernetes_version)
   ) : true
+}
+
+resource "null_resource" "validate_eks_version" {
+  count = local.is_eks && !contains(local.supported_eks_versions, local.eks_config.kubernetes_version) ? 1 : 0
+
+  provisioner "local-exec" {
+    command = "echo 'Unsupported EKS version: ${local.eks_config.kubernetes_version}. Supported: ${join(\", \", local.supported_eks_versions)}' && exit 1"
+  }
 }
 
 
 # ----------------
-# EC2 Key Pair (unchanged)
+# EC2 Key Pair 
 # ----------------
 resource "random_id" "unique_suffix" {
   count       = local.is_ec2 ? 1 : 0
@@ -130,7 +135,7 @@ output "private_key_pem" {
   sensitive = true
 }
 
-# EC2 Module (unchanged)
+# EC2 Module 
 module "ec2" {
   source          = "./modules/ec2"
   count           = local.is_ec2 ? 1 : 0
@@ -142,28 +147,27 @@ module "ec2" {
   attacks_to_enable = try(local.payload.attacks, [])  #pass attacks down to the EC2 module
 }
 
-# EKS Module (normalized inputs) — instantiate with for_each to keep stable address module.eks["eks"]
+
 module "eks" {
   source = "./modules/eks"
 
-  # when payload contains eks, create a single keyed module with key "eks" so old state addresses match
   for_each = local.is_eks && local.validate_eks ? { "eks" = local.eks_config } : {}
 
-  cluster_name               = each.value.cluster_name
-  kubernetes_version         = each.value.kubernetes_version
-  vpc_id                     = each.value.vpc_id
-  subnet_ids                 = each.value.subnet_ids
-  create_node_group           = true
+  cluster_name      = each.value.cluster_name
+  kubernetes_version = each.value.kubernetes_version
+  vpc_id            = each.value.vpc_id
+  subnet_ids        = each.value.subnet_ids
+
+  create_node_group         = true
   node_group_instance_types  = ["t3.medium"]
   node_group_desired_size    = 2
   node_group_min_size        = 1
   node_group_max_size        = 3
 
-  owner_name                 = each.value.Owner
-  tools_to_install           = each.value.tools_to_install
-  aws_region                  = var.aws_region
-  create_ecr_repos           = var.create_ecr_repos
-
+  owner_name       = each.value.Owner
+  tools_to_install = each.value.tools_to_install
+  aws_region       = var.aws_region
+  create_ecr_repos = var.create_ecr_repos
 }
 
 # Outputs

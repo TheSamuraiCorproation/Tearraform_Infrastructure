@@ -8,4 +8,3 @@ output "eks_kubeconfig" {
 
   sensitive = true
 }
-

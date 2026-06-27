@@ -309,58 +309,62 @@ stage('Deploy Tools on EKS') {
   steps {
     withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-terraform-creds']]) {
       script {
-
-        def payload     = readJSON file: 'payload.json'
-        def clusterName = payload.eks.cluster_name
-        def region      = env.AWS_DEFAULT_REGION ?: 'eu-central-1'
+        def payload = readJSON file: 'payload.json'
+        def eks = payload.eks ?: [:]
+        def clusterName = eks.cluster_name?.trim()
+        def region = env.AWS_DEFAULT_REGION ?: 'eu-central-1'
         def ecrRegistry = "430118831270.dkr.ecr.${region}.amazonaws.com"
-        def HELM_BASE   = "${WORKSPACE}/helm"
+        def HELM_BASE = "${WORKSPACE}/helm"
 
-        echo " Deploying to EKS cluster: ${clusterName}"
+        if (!clusterName) {
+          error "Missing eks.cluster_name in payload"
+        }
 
-        /* ================= KUBECONFIG ================= */
-        writeFile file: 'kubeconfig.yaml',
-          text: sh(script: "terraform output -raw eks_kubeconfig", returnStdout: true).trim()
+        echo "Deploying to EKS cluster: ${clusterName}"
 
+        def kubeconfigText = sh(script: "terraform output -raw eks_kubeconfig", returnStdout: true).trim()
+        if (!kubeconfigText) {
+          error "eks_kubeconfig output is empty"
+        }
+
+        writeFile file: 'kubeconfig.yaml', text: kubeconfigText
         env.KUBECONFIG = "${WORKSPACE}/kubeconfig.yaml"
 
-        /* ================= ECR LOGIN ================= */
         sh """
-aws ecr get-login-password --region ${region} \
-| docker login --username AWS --password-stdin ${ecrRegistry}
-"""
-
-        /* ================= ALB CONTROLLER ================= */
-        sh """
-helm repo add eks https://aws.github.io/eks-charts || true
-helm repo update
-
-helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-  -n kube-system \
-  --create-namespace \
-  --set clusterName=${clusterName} \
-  --set serviceAccount.create=true \
-  --set region=${region}
-"""
-
-        /* ================= KUBERNETES DASHBOARD ================= */
-        sh """
-helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/ || true
-helm repo update
-
-helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
-  -n kubernetes-dashboard \
-  --create-namespace \
-  --set protocolHttp=false \
-  --set service.type=ClusterIP
-"""
+          aws ecr get-login-password --region ${region} \
+          | docker login --username AWS --password-stdin ${ecrRegistry}
+        """
 
         sh """
-kubectl rollout status deployment/kubernetes-dashboard \
-  -n kubernetes-dashboard --timeout=300s
-"""
+          helm repo add eks https://aws.github.io/eks-charts || true
+          helm repo update
 
-        /* ================= ADMIN USER ================= */
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            -n kube-system \
+            --create-namespace \
+            --set clusterName=${clusterName} \
+            --set serviceAccount.create=true \
+            --set region=${region} \
+            --wait --timeout 10m
+        """
+
+        sh """
+          helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/ || true
+          helm repo update
+
+          helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard \
+            -n kubernetes-dashboard \
+            --create-namespace \
+            --set protocolHttp=false \
+            --set service.type=ClusterIP \
+            --wait --timeout 10m
+        """
+
+        sh """
+          kubectl rollout status deployment/kubernetes-dashboard \
+            -n kubernetes-dashboard --timeout=300s
+        """
+
         sh """
 cat <<'YAML' > dashboard-adminuser.yaml
 apiVersion: v1
@@ -386,37 +390,34 @@ YAML
 kubectl apply -f dashboard-adminuser.yaml
 """
 
-        /* ================= INSTALL YOUR MONITORING INGRESS ================= */
         sh """
-helm upgrade --install monitoring ${HELM_BASE}/monitoring \
-  -n kubernetes-dashboard \
-  --timeout 10m
-"""
+          helm upgrade --install monitoring ${HELM_BASE}/monitoring \
+            -n kubernetes-dashboard \
+            --timeout 10m \
+            --wait
+        """
 
-        /* ================= ECR SECRET FOR TOOLS ================= */
-        def tools = payload.eks.tools_to_install ?: []
+        def tools = eks.tools_to_install ?: []
         def namespaces = tools.collect { it.namespace ?: 'default' }.unique()
 
         namespaces.each { ns ->
           sh "kubectl get ns ${ns} || kubectl create ns ${ns}"
 
           sh """
-kubectl delete secret ecr-creds -n ${ns} --ignore-not-found
-kubectl create secret docker-registry ecr-creds \
-  --docker-server=${ecrRegistry} \
-  --docker-username=AWS \
-  --docker-password=\$(aws ecr get-login-password --region ${region}) \
-  -n ${ns}
-"""
+            kubectl delete secret ecr-creds -n ${ns} --ignore-not-found
+            kubectl create secret docker-registry ecr-creds \
+              --docker-server=${ecrRegistry} \
+              --docker-username=AWS \
+              --docker-password=\$(aws ecr get-login-password --region ${region}) \
+              -n ${ns}
+          """
         }
 
-        /* ================= DEPLOY CLIENT TOOLS ================= */
         tools.each { t ->
-
           def chartPath = "${HELM_BASE}/${t.chart}"
 
           if (!fileExists(chartPath)) {
-            error "❌ Helm chart not found: ${chartPath}"
+            error "Helm chart not found: ${chartPath}"
           }
 
           writeFile file: "values-${t.name}.yaml", text: """
@@ -428,31 +429,32 @@ imagePullSecrets:
 """
 
           sh """
-helm upgrade --install ${t.name} ${chartPath} \
-  -n ${t.namespace} \
-  --create-namespace \
-  -f values-${t.name}.yaml \
-  --timeout 15m
-"""
+            helm upgrade --install ${t.name} ${chartPath} \
+              -n ${t.namespace} \
+              --create-namespace \
+              -f values-${t.name}.yaml \
+              --timeout 15m \
+              --wait
+          """
         }
 
-        /* ================= GET ALB URL ================= */
         sleep 20
 
         def albHost = sh(
           script: """
-kubectl get ingress eks-dashboard-ingress \
-  -n kubernetes-dashboard \
-  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-""",
+            kubectl get ingress eks-dashboard-ingress \
+              -n kubernetes-dashboard \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+          """,
           returnStdout: true
         ).trim()
 
+        if (!albHost) {
+          error "Failed to resolve EKS dashboard ingress hostname"
+        }
+
         env.DASHBOARD_URL = "https://${albHost}"
 
-        echo " Dashboard URL: ${env.DASHBOARD_URL}"
-
-        /* ================= GENERATE LOGIN TOKEN ================= */
         def token = sh(
           script: "kubectl -n kubernetes-dashboard create token admin-user",
           returnStdout: true
@@ -460,9 +462,8 @@ kubectl get ingress eks-dashboard-ingress \
 
         env.DASHBOARD_TOKEN = token
 
-        echo " Dashboard Token Generated"
-
-        echo "✅ EKS deployment completed successfully"
+        echo "Dashboard URL: ${env.DASHBOARD_URL}"
+        echo "EKS deployment completed successfully"
       }
     }
   }

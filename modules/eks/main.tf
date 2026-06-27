@@ -199,3 +199,7 @@ output "node_group_names" {
   value = try([for ng in aws_eks_node_group.node_group : ng.node_group_name], [])
 }
 
+output "ecr_repo_urls" {
+  value = try([for r in aws_ecr_repository.tool_repo : r.repository_url], [])
+}
+

@@ -13,7 +13,7 @@ variable "subnet_ids" {
 variable "kubernetes_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.29"
+  default     = "1.35"
 }
 
 variable "owner_name" {
