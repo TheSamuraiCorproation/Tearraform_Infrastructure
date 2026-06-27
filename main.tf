@@ -101,14 +101,6 @@ locals {
   ) : true
 }
 
-resource "null_resource" "validate_eks_version" {
-  count = local.is_eks && !contains(local.supported_eks_versions, local.eks_config.kubernetes_version) ? 1 : 0
-
-  provisioner "local-exec" {
-    command = "echo 'Unsupported EKS version: ${local.eks_config.kubernetes_version}. Supported: ${join(\", \", local.supported_eks_versions)}' && exit 1"
-  }
-}
-
 
 # ----------------
 # EC2 Key Pair 
